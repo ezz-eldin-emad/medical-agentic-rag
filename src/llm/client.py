@@ -30,8 +30,6 @@ def _resolve_api_keys(api_keys: list[str] | str | None) -> list[str]:
 class LLMClient:
     """Thin wrapper around LiteLLM for chat/completions only.
 
-    RAG embeddings live in ``src.embeddings`` (BGE-M3), not here.
-
     Gemini models are normalized to the ``gemini/`` prefix so requests use
     Google AI Studio with ``GEMINI_API_KEY``, not Vertex AI ADC.
 

@@ -1,6 +1,6 @@
 import os
 
-# ── LLM Defaults (chat/completions only — RAG embeddings are in src.embeddings) ──
+# ── LLM Defaults (chat/completions only) ──
 DEFAULT_MODEL = os.environ.get("LLM_DEFAULT_MODEL", "gemini/gemini-3.5-flash")
 TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.0"))
 TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "90"))  # seconds
