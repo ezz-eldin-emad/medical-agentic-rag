@@ -25,7 +25,11 @@ def get_embedder(
 
     if chosen in {"huggingface", "hf", "hf_inference"}:
         from src.embeddings.huggingface_api import HuggingFaceInferenceEmbedder
-        return HuggingFaceInferenceEmbedder(settings=app_settings)
+        return HuggingFaceInferenceEmbedder(
+            settings=app_settings,
+            model_id=model_id,
+            revision=revision,
+        )
 
     if chosen in {"modal", "modal_api", "remote"}:
         from src.embeddings.modal_api import BGEM3ModalAPIEmbedder

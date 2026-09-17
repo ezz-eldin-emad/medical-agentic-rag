@@ -15,9 +15,14 @@ from src.embeddings.protocol import EmbeddingResult
 class HuggingFaceInferenceEmbedder:
     """Call HF feature-extraction inference without loading a local model."""
 
-    def __init__(self, *, settings: AppSettings | None = None, timeout: float = 90.0, max_retries: int = 3) -> None:
+    def __init__(self, *, settings: AppSettings | None = None, model_id: str | None = None, revision: str | None = None, timeout: float = 90.0, max_retries: int = 3) -> None:
         app_settings = settings or get_settings()
-        self.model_id = os.environ.get("HF_EMBED_MODEL", "intfloat/multilingual-e5-large").strip() or app_settings.embedding.model_id
+        # HF deployments may use a different model than the local/Modal default
+        # (for example E5 instead of BGE-M3).  An explicit environment override
+        # must win even when the shared factory passes the central model id.
+        configured_model = os.environ.get("HF_EMBED_MODEL", "").strip()
+        self.model_id = (configured_model or model_id or "intfloat/multilingual-e5-large").strip() or app_settings.embedding.model_id
+        self.revision = revision or app_settings.embedding.revision or "default"
         self.timeout = timeout
         self.max_retries = max_retries
         self.token = app_settings.secrets.hf_token

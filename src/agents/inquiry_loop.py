@@ -36,6 +36,14 @@ class InquiryLoop:
             language=str(analysis.get("language") or "en"),
         )
         updates = self._extract_updates(current, query)
+        # Let the configured API model interpret natural-language answers
+        # (Arabic date/duration expressions, severity, etc.). Deterministic
+        # extraction remains the safety fallback when the model is unavailable
+        # or returns invalid JSON.
+        if self.llm_client is not None:
+            llm_updates = self._extract_updates_with_llm(current, query)
+            if llm_updates:
+                updates = {**updates, **{k: v for k, v in llm_updates.items() if v}}
         turn_count = current.turn_count + 1
         score, missing = self._score(updates)
         status = "ready" if score >= 0.7 else "collecting"
@@ -80,6 +88,29 @@ class InquiryLoop:
             "answer": next_question,
             "next_question": next_question,
         }
+
+    def _extract_updates_with_llm(self, current: PatientContext, query: str) -> dict[str, Any]:
+        """Extract only known context fields as JSON using the clarification model."""
+        import json
+        prompt = (
+            "Extract facts from the user's latest medical message. Return JSON only, no markdown. "
+            "Allowed keys: symptoms, onset_or_duration, trajectory, severity, associated_symptoms, relevant_context. "
+            "Use empty strings or [] when a value is not present. Do not infer or diagnose.\n"
+            f"Existing context: {current.to_dict()}\nLatest message: {query}"
+        )
+        try:
+            response = self.llm_client.complete(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.settings.llm.clarifier_model,
+                temperature=0,
+                num_retries=1,
+            )
+            raw = str(response.choices[0].message.content or "").strip()
+            data = json.loads(raw[raw.find("{") : raw.rfind("}") + 1])
+            allowed = {"symptoms", "onset_or_duration", "trajectory", "severity", "associated_symptoms", "relevant_context"}
+            return {k: data[k] for k in allowed if k in data and isinstance(data[k], (str, list))}
+        except Exception:
+            return {}
 
     def _next_question(
         self,
@@ -129,8 +160,8 @@ class InquiryLoop:
         duration = current.onset_or_duration
         duration_match = re.search(
             r"(?:for|since)\s+[^,.!?]+|"
-            r"(?:منذ|لمدة|بقال(?:ي|ه|ها|و)?)\s*[^،,.!?]+|"
-            r"\d+\s*(?:minute|minutes|hour|hours|day|days|week|weeks|month|months|دقيقة|دقائق|ساعة|ساعات|يوم|أيام|ايام|أسبوع|أسابيع|اسابيع|شهر|شهور)|"
+            r"(?:منذ|من|لمدة|بقال(?:ي|ه|ها|و)?)\s*[^،,.!?]+|"
+            r"\d+\s*(?:minute|minutes|hour|hours|day|days|week|weeks|month|months|دقيقة|دقائق|ساعة|ساعات|يوم|يومين|يومان|أيام|ايام|أسبوع|أسابيع|اسابيع|شهر|شهور)|"
             r"\b(?:today|yesterday|اليوم|أمس|امس)\b",
             normalized,
             flags=re.I,
