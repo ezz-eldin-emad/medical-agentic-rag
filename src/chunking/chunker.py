@@ -14,8 +14,8 @@ import json
 import re
 from pathlib import Path
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 import tiktoken
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src.utils.helpers import get_project_root, setup_logging
 
@@ -26,11 +26,26 @@ CHUNK_OVERLAP = 50
 log = setup_logging("chunker")
 
 # ── Tokenizer ────────────────────────────────────────────────────────
-_tokenizer = tiktoken.get_encoding("cl100k_base")
+_tokenizer = None
+_tokenizer_unavailable = False
 
 
 def count_tokens(text: str) -> int:
-    """Return the number of tokens in *text* using cl100k_base encoding."""
+    """Return a token estimate without making import-time network requests."""
+    global _tokenizer, _tokenizer_unavailable
+
+    if _tokenizer is None and not _tokenizer_unavailable:
+        try:
+            _tokenizer = tiktoken.get_encoding("cl100k_base")
+        except Exception as err:
+            _tokenizer_unavailable = True
+            log.warning(
+                "cl100k_base is unavailable (%s); using a word-count estimate.",
+                err,
+            )
+
+    if _tokenizer is None:
+        return len(text.split())
     return len(_tokenizer.encode(text))
 
 

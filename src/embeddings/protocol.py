@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any, Protocol, TypedDict
 
 
-class EmbeddingResult(TypedDict, total=False):
-    """Dense vectors always; sparse lexical weights and colbert token vectors when supported."""
+class EmbeddingResult(TypedDict):
+    """Dense vectors plus optional sparse and ColBERT representations."""
 
     dense_vecs: Any
     lexical_weights: Any | None

@@ -7,7 +7,6 @@ to generate high-performance embeddings without local GPU hardware.
 
 from __future__ import annotations
 
-import os
 import time
 from typing import Any
 
@@ -15,8 +14,9 @@ import numpy as np
 import requests
 
 from src.embeddings.protocol import EmbeddingResult
+from src.config import AppSettings, get_settings
 
-_DEFAULT_MODAL_URL = "https://eea29990--bge-m3-api-bgem3api-embed.modal.run"
+_DEFAULT_MODAL_URL = ""
 
 
 class BGEM3ModalAPIEmbedder:
@@ -31,28 +31,29 @@ class BGEM3ModalAPIEmbedder:
         timeout: float = 90.0,
         max_retries: int = 5,
         return_colbert: bool = False,
+        settings: AppSettings | None = None,
     ) -> None:
-        self.model_id = model_id or os.environ.get("BGE_MODEL_ID") or os.environ.get(
-            "BGE_MODEL_NAME", "BAAI/bge-m3"
-        )
-        self.revision = (
-            revision
-            if revision is not None
-            else os.environ.get("BGE_MODEL_REVISION", "")
-        ).strip()
+        app_settings = settings or get_settings()
+        self.model_id = model_id or app_settings.embedding.model_id
+        self.revision = (revision if revision is not None else app_settings.embedding.revision).strip()
         self.timeout = timeout
         self.max_retries = max_retries
         self.return_colbert = return_colbert
 
         url = (
             api_url
-            or os.environ.get("MODAL_EMBED_URL")
-            or os.environ.get("BGEM3_API_URL")
+            or app_settings.embedding.modal_url
             or _DEFAULT_MODAL_URL
         )
         self.api_url = url.strip().rstrip("/")
+        if not self.api_url:
+            raise ValueError(
+                "MODAL_EMBED_URL is required when EMBEDDER_BACKEND=modal."
+            )
 
         self._headers = {"Content-Type": "application/json"}
+        if app_settings.secrets.modal_embed_token:
+            self._headers["Authorization"] = f"Bearer {app_settings.secrets.modal_embed_token}"
 
     def _post(self, texts: list[str]) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -74,10 +75,15 @@ class BGEM3ModalAPIEmbedder:
                 if response.status_code in {429, 500, 502, 503, 504}:
                     time.sleep(min(2**attempt, 20))
                     continue
+                if response.status_code in {401, 403}:
+                    response.raise_for_status()
                 response.raise_for_status()
                 return response.json()
             except requests.RequestException as exc:
                 last_error = exc
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status in {401, 403}:
+                    raise RuntimeError("Modal embedding authorization failed") from exc
                 time.sleep(min(2**attempt, 20))
 
         raise RuntimeError(

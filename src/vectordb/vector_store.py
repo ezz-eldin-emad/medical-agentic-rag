@@ -1,18 +1,17 @@
 """
 Module: vector_store.py
 Purpose: Encode medical & clinic chunks with BGE-M3 and index them
-         into Qdrant Cloud (dense-primary; sparse when local embedder provides it).
+         into local Qdrant or a configured Qdrant server.
 
 Usage:
-    # Indexing must use the local FlagEmbedding backend (laptop / Colab)
-    EMBEDDER_BACKEND=local python -m src.vectordb.vector_store
+    # Index locally with the local FlagEmbedding backend
+    python -m src.vectordb.vector_store --local
     python -m src.vectordb.vector_store --mode clean
     python -m src.vectordb.vector_store --chunks-file data/chunks/chunks_v2.json --batch-size 64
 """
 
 import argparse
 import json
-import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -20,13 +19,12 @@ from pathlib import Path
 
 from tqdm import tqdm
 
+from src.config import get_settings
 from src.embeddings.factory import get_embedder
 from src.embeddings.protocol import Embedder
 from src.utils.helpers import (
     deterministic_uuid,
     get_git_commit,
-    get_project_root,
-    load_env,
     setup_logging,
 )
 
@@ -34,9 +32,6 @@ log = setup_logging("vectordb.vector_store")
 
 # ── Defaults ─────────────────────────────────────────────────────────
 _DEFAULT_CHUNKS_FILE = "data/chunks/chunks.json"
-_DEFAULT_BGE_MODEL = "BAAI/bge-m3"
-_MEDICAL_COLLECTION = "medical_kb"
-_CLINIC_COLLECTION = "clinic_kb"
 _DENSE_DIM = 1024
 _DEFAULT_BATCH_SIZE = 32
 _SCRIPT_VERSION = "2.1.0"
@@ -47,8 +42,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     p = argparse.ArgumentParser(
         description=(
-            "Index medical/clinic chunks into Qdrant Cloud. "
-            "Requires EMBEDDER_BACKEND=local (FlagEmbedding)."
+            "Index medical/clinic chunks into local Qdrant or a configured Qdrant server. "
+            "The --local flag forces on-disk Qdrant and local FlagEmbedding."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -75,12 +70,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--bge-model",
         default=None,
-        help="Override BGE_MODEL_ID (default from env or BAAI/bge-m3).",
+        help="Override the centralized BGE model setting for this indexing run.",
     )
     p.add_argument(
         "--revision",
         default=None,
-        help="Override BGE_MODEL_REVISION (HF commit SHA for weight pinning).",
+        help="Override the centralized BGE revision for this indexing run.",
     )
     p.add_argument(
         "--collection-prefix",
@@ -90,13 +85,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--fp16",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Use FP16 for the local embedding model.",
+        default=None,
+        help="Use FP16 for the local embedding model (defaults to BGE_USE_FP16)."
     )
     p.add_argument(
         "--local",
         action="store_true",
-        help="Run indexing pipeline locally (forces local FlagEmbedding and local Qdrant URL defaults).",
+        help="Force local FlagEmbedding and the on-disk Qdrant database.",
     )
     return p.parse_args(argv)
 
@@ -138,9 +133,8 @@ def ensure_collections(
 ) -> None:
     """Create (or recreate) Qdrant collections with dense + optional sparse config.
 
-    Dense (1024) is the primary retrieval vector for the free deploy path.
-    Sparse remains configured so local FlagEmbedding can still write lexical
-    weights when available; query-time ``hf_api`` uses dense only.
+    Dense (1024) is the primary retrieval vector for the local runtime.
+    Sparse remains configured so local FlagEmbedding can write lexical weights.
     """
     from qdrant_client.models import (
         Distance,
@@ -330,21 +324,21 @@ def verify_collections(client, collection_names: list[str]) -> None:
 def main(argv: list[str] | None = None) -> None:
     """Entry point — parse args, load env, encode, and index."""
     args = parse_args(argv)
-    load_env()
+    settings = get_settings()
+    if args.local:
+        settings = settings.for_local()
 
-    root = get_project_root()
+    root = settings.project_root
     git_commit = get_git_commit()
     log.info("Project root: %s", root)
     log.info("Git commit:   %s", git_commit)
 
-    backend = (os.environ.get("EMBEDDER_BACKEND") or "modal").strip().lower()
-    if args.local:
-        backend = "local"
+    backend = settings.embedding.backend.strip().lower()
 
     if backend not in {"modal", "modal_api", "remote", "local", "flag", "flagembedding"}:
         log.error(
             "Unknown or unsupported EMBEDDER_BACKEND=%r. "
-            "Supported backends: 'modal' (default cloud GPU API) or 'local' (FlagEmbedding).",
+            "Supported backends: 'local' (default FlagEmbedding) or 'modal'.",
             backend,
         )
         sys.exit(1)
@@ -354,19 +348,13 @@ def main(argv: list[str] | None = None) -> None:
         chunks_path = root / chunks_path
 
     prefix = args.collection_prefix
-    medical_coll = f"{prefix}{_MEDICAL_COLLECTION}"
-    clinic_coll = f"{prefix}{_CLINIC_COLLECTION}"
+    medical_coll = f"{prefix}{settings.vectordb.medical_collection}"
+    clinic_coll = f"{prefix}{settings.vectordb.clinic_collection}"
     collection_names = [medical_coll, clinic_coll]
 
-    qdrant_url = os.environ.get("QDRANT_URL")
-    if not qdrant_url and args.local:
-        qdrant_url = "http://localhost:6333"
-
-    qdrant_api_key = os.environ.get("QDRANT_API_KEY")
-
-    if not qdrant_url:
-        log.error("QDRANT_URL is not set. Add it to .env or export it.")
-        sys.exit(1)
+    qdrant_url = settings.vectordb.qdrant_url.strip().rstrip("/")
+    qdrant_path = settings.resolve_path(settings.vectordb.qdrant_path)
+    qdrant_api_key = settings.secrets.qdrant_api_key or None
 
     t_start = time.time()
 
@@ -374,36 +362,45 @@ def main(argv: list[str] | None = None) -> None:
 
     from qdrant_client import QdrantClient
 
-    qdrant_dest = "Qdrant Local" if args.local and "localhost" in qdrant_url else "Qdrant Cloud"
-    log.info("Connecting to %s at %s ...", qdrant_dest, qdrant_url)
-    client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
-    log.info("Connected successfully.")
+    if qdrant_url:
+        qdrant_dest = qdrant_url
+        log.info("Connecting to Qdrant server at %s ...", qdrant_url)
+        client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+    else:
+        qdrant_path_obj = Path(qdrant_path).expanduser()
+        if not qdrant_path_obj.is_absolute():
+            qdrant_path_obj = root / qdrant_path_obj
+        qdrant_path_obj.mkdir(parents=True, exist_ok=True)
+        qdrant_dest = str(qdrant_path_obj)
+        log.info("Opening local on-disk Qdrant at %s ...", qdrant_path_obj)
+        client = QdrantClient(path=str(qdrant_path_obj))
+
+    log.info("Connected to Qdrant at %s.", qdrant_dest)
 
 
     ensure_collections(client, collection_names, mode=args.mode)
 
-    model_id = args.bge_model or os.environ.get("BGE_MODEL_ID") or os.environ.get(
-        "BGE_MODEL_NAME", _DEFAULT_BGE_MODEL
-    )
+    model_id = args.bge_model or settings.embedding.model_id
     revision = (
         args.revision
         if args.revision is not None
-        else os.environ.get("BGE_MODEL_REVISION", "")
+        else settings.embedding.revision
     )
     embed_backend = backend
+    use_fp16 = args.fp16 if args.fp16 is not None else settings.embedding.use_fp16
 
     log.info(
         "Loading embedder backend=%s model=%s revision=%s fp16=%s ...",
         embed_backend,
         model_id,
         revision or "default",
-        args.fp16,
+        use_fp16,
     )
     embedder = get_embedder(
         backend=embed_backend,
         model_id=model_id,
         revision=revision or None,
-        use_fp16=args.fp16,
+        use_fp16=use_fp16,
     )
     log.info("Embedder ready.")
 

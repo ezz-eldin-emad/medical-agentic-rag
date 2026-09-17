@@ -1,24 +1,38 @@
-import os
+"""Backward-compatible LLM constants backed by centralized settings."""
 
-# ── LLM Defaults (chat/completions only) ──
-DEFAULT_MODEL = os.environ.get("LLM_DEFAULT_MODEL", "gemini/gemini-3.5-flash")
-TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.0"))
-TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "90"))  # seconds
+from __future__ import annotations
+
+from src.config import get_settings
+
+_SETTINGS = get_settings()
+DEFAULT_MODEL = _SETTINGS.llm.default_model
+CLASSIFIER_MODEL = _SETTINGS.llm.classifier_model
+REWRITER_MODEL = _SETTINGS.llm.rewriter_model
+GENERATOR_MODEL = _SETTINGS.llm.generator_model
+TEMPERATURE = _SETTINGS.llm.temperature
+CLASSIFIER_TEMPERATURE = _SETTINGS.llm.classifier_temperature
+REWRITER_TEMPERATURE = _SETTINGS.llm.rewriter_temperature
+GENERATOR_TEMPERATURE = _SETTINGS.llm.generator_temperature
+TIMEOUT = _SETTINGS.llm.timeout_seconds
+RETRIES = _SETTINGS.llm.retries
+
+_PROVIDER_PREFIXES = (
+    "gemini/",
+    "vertex_ai/",
+    "google/",
+    "groq/",
+    "openrouter/",
+    "openai/",
+    "anthropic/",
+)
 
 
 def normalize_model(model: str) -> str:
-    """Normalize a LiteLLM model id for Google AI Studio (API key auth).
-
-    Bare names like ``gemini-3.5-flash`` are routed by LiteLLM to Vertex AI,
-    which requires Application Default Credentials — not ``GEMINI_API_KEY``.
-    The ``gemini/`` prefix forces Google AI Studio.
-    """
-    model = model.strip()
-    if not model:
-        return normalize_model(DEFAULT_MODEL)
-
+    """Normalize a model id so Gemini uses Google AI Studio key auth."""
+    model = model.strip() if model else DEFAULT_MODEL
     lower = model.lower()
-    if lower.startswith(("gemini/", "vertex_ai/", "google/")):
+
+    if lower.startswith(_PROVIDER_PREFIXES):
         return model
     if lower.startswith("gemini-"):
         return f"gemini/{model}"

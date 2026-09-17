@@ -117,5 +117,14 @@ venv.bak/
 data/
 pyrightconfig.json
 
-# Sandbox / Playground
-playground/
+
+# Agents files
+.agents/
+.claude/
+.github/
+_bmad/
+_bmad-output/
+
+playground
+ARCHITECTURE.html
+ROADMAP.md

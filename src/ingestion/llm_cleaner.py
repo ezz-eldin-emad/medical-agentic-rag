@@ -3,7 +3,7 @@ Module: llm_cleaner.py
 Purpose: Clean pre-processed medical text using an LLM to remove boilerplate,
          correct line breaks, and structure it while preserving all medical facts.
 
-Supports multiple GEMINI_API_KEY values (comma-separated in .env).
+Supports multiple provider API keys (comma-separated in .env).
 When one key hits its quota (429), it automatically rotates to the next.
 Only stops if ALL keys are exhausted.
 
@@ -24,7 +24,6 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -33,9 +32,10 @@ from typing import Any
 from tqdm import tqdm
 from pydantic import BaseModel, Field, ValidationError
 
-from src.llm import LLMClient
+from src.llm.client import LLMClient
 from src.llm import config as llm_config
-from src.utils.helpers import get_project_root, load_env, setup_logging
+from src.config import AppSettings, get_settings
+from src.utils.helpers import setup_logging
 
 log = setup_logging("llm_cleaner")
 
@@ -59,11 +59,30 @@ class MedicalCleanedData(BaseModel):
 
 
 # ── API Key Management ───────────────────────────────────────────────
-def load_api_keys() -> list[str]:
-    """Parse comma-separated ``GEMINI_API_KEY`` values from the environment."""
-    raw = os.environ.get("GEMINI_API_KEY", "")
-    keys = [k.strip() for k in raw.split(",") if k.strip()]
-    return keys
+def load_api_keys(model: str, settings: AppSettings | None = None) -> list[str]:
+    """Parse comma-separated API keys for the selected LiteLLM provider."""
+    provider = model.split("/", 1)[0].strip().lower()
+    key_name = {
+        "gemini": "GEMINI_API_KEY",
+        "google": "GEMINI_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+    }.get(provider)
+    if key_name is None:
+        return []
+
+    app_settings = settings or get_settings()
+    secret_field = {
+        "GEMINI_API_KEY": app_settings.secrets.gemini_api_key,
+        "GROQ_API_KEY": app_settings.secrets.groq_api_key,
+        "OPENAI_API_KEY": app_settings.secrets.openai_api_key,
+        "OPENROUTER_API_KEY": app_settings.secrets.openrouter_api_key,
+        "ANTHROPIC_API_KEY": app_settings.secrets.anthropic_api_key,
+    }[key_name]
+    raw = secret_field
+    return [key.strip() for key in raw.split(",") if key.strip()]
 
 
 # ── Prompt Loader ────────────────────────────────────────────────────
@@ -140,7 +159,7 @@ def write_json_atomic(dest_path: Path, data: dict[str, Any]) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     p = argparse.ArgumentParser(
-        description="Clean medical text using Gemini LLM.",
+        description="Clean medical text using the configured LLM.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
@@ -161,7 +180,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--model",
         default=_DEFAULT_MODEL,
-        help="LiteLLM model id (use gemini/ prefix for Google AI Studio).",
+        help="Override the centralized LLM model for this cleaning run.",
     )
     p.add_argument(
         "--delay",
@@ -181,15 +200,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     """Entry point — clean medical text with Gemini."""
     args = parse_args(argv)
-    load_env()
-    root = get_project_root()
+    settings = get_settings()
+    root = settings.project_root
 
-    api_keys = load_api_keys()
-    if not api_keys and not args.dry_run:
-        log.error("No GEMINI_API_KEY found. Add it to .env or export it.")
+    model = llm_config.normalize_model(args.model)
+    api_keys = load_api_keys(model, settings)
+    provider = model.split("/", 1)[0].strip().lower()
+    if not api_keys and not args.dry_run and provider not in {"ollama", "local"}:
+        log.error("No API key found for provider '%s'. Add it to .env or export it.", provider)
         sys.exit(1)
 
-    log.info(f"Loaded {len(api_keys)} API key(s).")
+    log.info("Loaded %d API key(s) for provider %s.", len(api_keys), provider)
 
     processed_dir = Path(args.processed_dir)
     if not processed_dir.is_absolute():
@@ -211,7 +232,6 @@ def main(argv: list[str] | None = None) -> None:
     system_prompt = load_prompt(prompt_path)
     log.info(f"Loaded system prompt from: {prompt_path}")
 
-    model = llm_config.normalize_model(args.model)
     if model != args.model.strip():
         log.info("Normalized model id: %s → %s", args.model, model)
 
@@ -220,6 +240,7 @@ def main(argv: list[str] | None = None) -> None:
         default_model=model,
         temperature=llm_config.TEMPERATURE,
         api_keys=api_keys,
+        settings=settings,
     )
 
     total_files = 0
