@@ -38,14 +38,11 @@ class WebRuntime:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    settings = get_settings()
-    runtime = WebRuntime(settings)
-    app.state.runtime = runtime
-    await runtime.startup()
-    try:
-        yield
-    finally:
-        await runtime.shutdown()
+    # Serverless platforms may invoke lightweight routes before secrets and
+    # external services are needed. Defer Telegram/Qdrant startup until the
+    # webhook is actually called so `/` and `/healthz` remain useful probes.
+    app.state.runtime = None
+    yield
 
 
 app = FastAPI(title="Medical Agentic RAG", lifespan=lifespan)
@@ -60,7 +57,13 @@ async def root() -> dict[str, str]:
 async def healthz(request: Request) -> dict[str, Any]:
     runtime = getattr(request.app.state, "runtime", None)
     if runtime is None:
-        return {"status": "starting"}
+        settings = get_settings()
+        return {
+            "status": "ok",
+            "transport": settings.runtime.telegram_transport,
+            "state_backend": settings.runtime.state_backend,
+            "configured": bool(settings.runtime.public_base_url and settings.secrets.telegram_webhook_secret),
+        }
     return {"status": "ok", "transport": "webhook", "qdrant_state_collection": runtime.state_store.collection_name}
 
 
@@ -69,7 +72,11 @@ async def telegram_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
 ) -> dict[str, str]:
-    runtime: WebRuntime = request.app.state.runtime
+    runtime: WebRuntime | None = getattr(request.app.state, "runtime", None)
+    if runtime is None:
+        runtime = WebRuntime(get_settings())
+        await runtime.startup()
+        request.app.state.runtime = runtime
     expected = runtime.settings.secrets.telegram_webhook_secret
     if not expected or not x_telegram_bot_api_secret_token or not hmac.compare_digest(
         x_telegram_bot_api_secret_token, expected
