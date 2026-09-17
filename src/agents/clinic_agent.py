@@ -74,16 +74,16 @@ class ClinicAgent:
                 matched.append(doctor)
         return matched
 
-    def handle(self, intent: str = "clinic_info", entities: dict[str, Any] | None = None, *, user_ref: str = "anonymous", **_: object) -> dict[str, Any]:
+    def handle(self, intent: str = "clinic_info", entities: dict[str, Any] | None = None, *, user_ref: str = "anonymous", query: str = "", **_: object) -> dict[str, Any]:
         if intent == "booking":
             return self.book(entities or {}, user_ref=user_ref)
         if intent == "cancellation":
             return self.cancel(str((entities or {}).get("booking_id") or ""), user_ref=user_ref)
         if intent == "confirmation":
             return self.confirm(str((entities or {}).get("booking_id") or ""), user_ref=user_ref)
-        return self.lookup(intent=intent, entities=entities or {})
+        return self.lookup(intent=intent, entities=entities or {}, query=query)
 
-    def lookup(self, *, intent: str = "clinic_info", entities: dict[str, Any] | None = None) -> dict[str, Any]:
+    def lookup(self, *, intent: str = "clinic_info", entities: dict[str, Any] | None = None, query: str = "") -> dict[str, Any]:
         entities = entities or {}
         if self.booking_store is None and not self.clinic.get("_chunks"):
             doctors = self._doctors(entities)
@@ -103,7 +103,7 @@ class ClinicAgent:
                 rows.append({"doctor": doctor.get("name"), "specialization": doctor.get("specialization"), "day": day, "slots": schedule.get(day, []) if day else schedule})
             return {"route": "clinic_query", "answer": self._format_availability(rows, day), "data": {"doctors": rows}, "citations": []}
 
-        answer = self._llm_lookup(intent, entities, self._relevant_chunks(entities))
+        answer = self._llm_lookup(intent, entities, query, self._relevant_chunks(entities))
         return {"route": "clinic_query", "answer": answer, "data": {"intent": intent}, "citations": []}
 
     def _relevant_chunks(self, entities: dict[str, Any]) -> list[str]:
@@ -114,10 +114,10 @@ class ClinicAgent:
         selected = [c for c in chunks if any(t in self._norm(c) for t in terms)]
         return selected[:12] or chunks[:4]
 
-    def _llm_lookup(self, intent: str, entities: dict[str, Any], chunks: list[str]) -> str:
+    def _llm_lookup(self, intent: str, entities: dict[str, Any], query: str, chunks: list[str]) -> str:
         prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "agents" / "clinic_answer.txt"
         system = prompt_path.read_text(encoding="utf-8")
-        user = f"INTENT: {intent}\nENTITIES: {entities}\nDATA:\n" + "\n\n---\n\n".join(chunks)
+        user = f"USER QUESTION: {query}\nINTENT: {intent}\nENTITIES: {entities}\nDATA:\n" + "\n\n---\n\n".join(chunks)
         try:
             response = self.llm_client.complete(
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],

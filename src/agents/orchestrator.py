@@ -143,7 +143,7 @@ class AgentOrchestrator:
 
             if classification.query_class is QueryClass.CLINIC:
                 intent = classification.intent or "clinic_info"
-                result = self.clinic_agent.handle(intent=intent, entities=entities, user_ref=user_ref)
+                result = self.clinic_agent.handle(intent=intent, entities=entities, user_ref=user_ref, query=query)
                 return {**common, **self._normalize_result(result, "clinic_query"), "agent": "clinic_agent"}
 
             with self.tracer.span("clarifying_agent", {"query_length": len(query)}) as clarifying_span:
