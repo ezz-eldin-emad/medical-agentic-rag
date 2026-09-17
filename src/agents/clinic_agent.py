@@ -31,7 +31,27 @@ class ClinicAgent:
             self.booking_store = QdrantStateStore.from_settings(app_settings)
         self.clinic_path = clinic_path or app_settings.resolve_path(app_settings.agents.clinic_data_path)
         self.bookings_path = bookings_path or app_settings.resolve_path(app_settings.agents.bookings_path)
-        self.clinic = json.loads(self.clinic_path.read_text(encoding="utf-8"))
+        if clinic_path is None and app_settings.runtime.state_backend == "qdrant":
+            self.clinic = self._load_clinic_kb()
+        else:
+            self.clinic = json.loads(self.clinic_path.read_text(encoding="utf-8"))
+
+    def _load_clinic_kb(self) -> dict[str, Any]:
+        """Load the deployed clinic catalog from Qdrant chunks, not disk."""
+        try:
+            client = getattr(self.booking_store, "client", None)
+            if client is None:
+                return {"clinic_info": {}, "doctors": [], "services": [], "appointments_policy": {}}
+            records, _ = client.scroll(
+                collection_name=self.settings.vectordb.clinic_collection,
+                limit=128,
+                with_payload=True,
+                with_vectors=False,
+            )
+            texts = [str((point.payload or {}).get("text", "")) for point in records]
+            return {"clinic_info": {}, "doctors": [], "services": [], "appointments_policy": {}, "_chunks": texts}
+        except Exception:
+            return {"clinic_info": {}, "doctors": [], "services": [], "appointments_policy": {}, "_chunks": []}
 
     @staticmethod
     def _norm(value: object) -> str:
@@ -78,6 +98,8 @@ class ClinicAgent:
         return {"route": "clinic_query", "answer": self._format_info(), "data": self.clinic, "citations": []}
 
     def _format_info(self) -> str:
+        if self.clinic.get("_chunks"):
+            return "\n\n".join(self.clinic["_chunks"])
         info = self.clinic.get("clinic_info", {})
         policy = self.clinic.get("appointments_policy", {})
         services = self.clinic.get("services", [])
