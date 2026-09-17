@@ -9,7 +9,12 @@ from typing import Any
 from src.config import AppSettings, get_settings
 from src.llm.client import LLMClient
 from src.memory import PatientContext, PatientContextManager
-from src.prompts import load as load_prompt
+from pathlib import Path
+
+_PROMPT_ROOT = Path(__file__).resolve().parents[2] / "prompts"
+
+def load_prompt(name: str) -> str:
+    return (_PROMPT_ROOT / "agents" / f"{name}.txt").read_text(encoding="utf-8")
 
 
 class InquiryLoop:
