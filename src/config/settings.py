@@ -48,7 +48,7 @@ class SecretsSettings:
 @dataclass(frozen=True)
 class LLMSettings:
     default_model: str = "groq/openai/gpt-oss-20b"
-    classifier_model: str = "groq/allam-2-7b"
+    classifier_model: str = "groq/openai/gpt-oss-20b"
     rewriter_model: str = "groq/openai/gpt-oss-20b"
     generator_model: str = "groq/openai/gpt-oss-120b"
     temperature: float = 0.0

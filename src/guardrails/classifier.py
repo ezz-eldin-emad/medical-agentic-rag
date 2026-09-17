@@ -46,6 +46,7 @@ class QueryClassifier:
         "موعد", "مواعيد", "حجز", "احجز", "إلغاء", "الغاء", "إعادة الحجز",
         "عيادة", "العياده", "سعر", "أسعار", "اسعار", "تكلفة", "تأمين",
         "التأمين", "عنوان", "موقع", "ساعات العمل", "مواعيد الأطباء",
+        "تخصصات", "تخصص", "دكاترة", "دكتور", "أطباء", "طبيب", "متاح", "المتاح",
     )
 
     _CLASSIFIER_PROMPT = """You are a safe routing classifier for a medical clinic assistant.
@@ -63,6 +64,12 @@ Use intent values:
 
 Return only valid JSON with this shape:
 {"query_class":"...","intent":"...","confidence":0.0,"reason":"short reason", "entities":{"doctor":"", "specialty":"", "date":"YYYY-MM-DD", "weekday":"", "time":"HH:MM", "booking_id":""}}
+
+Routing rules: questions about clinic doctors, specialties, services, prices,
+working hours, appointments, or booking are clinic_query even when the user
+also mentions a symptom. Questions asking for symptoms, causes, or medical
+explanations without clinic logistics are medical_query. Short follow-ups such
+as "غيرهم؟" inherit the previous route when conversation context is supplied.
 Use null for unknown entities. Any possible emergency symptom must be classified as emergency.
 """
 
@@ -113,14 +120,6 @@ Use null for unknown entities. Any possible emergency symptom must be classified
                     return llm_result
                 return llm_result
 
-        clinic = self._matches(normalized, self._CLINIC)
-        if clinic:
-            return QueryClassification(
-                QueryClass.CLINIC, 0.95, clinic,
-                "Clinic or appointment terms detected.",
-                intent=self._normalize_clinic_intent(normalized, ""),
-                entities=self._enrich_entities(normalized, {}),
-            )
         return QueryClassification(
             QueryClass.MEDICAL, 0.70, (),
             "No emergency or clinic routing term detected; use medical flow.",
