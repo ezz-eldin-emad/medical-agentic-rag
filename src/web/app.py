@@ -8,13 +8,16 @@ from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
 
-from src.adapters.telegram_bot import TelegramBotAdapter
 from src.config import AppSettings, get_settings
-from src.state import QdrantStateStore
 
 
 class WebRuntime:
     def __init__(self, settings: AppSettings) -> None:
+        # Keep lightweight Vercel routes importable without initializing the
+        # Telegram/RAG dependency graph. Heavy integrations load on webhook.
+        from src.adapters.telegram_bot import TelegramBotAdapter
+        from src.state import QdrantStateStore
+
         self.settings = settings
         if settings.runtime.telegram_transport != "webhook":
             raise RuntimeError("Vercel HTTP runtime requires TELEGRAM_TRANSPORT=webhook")
