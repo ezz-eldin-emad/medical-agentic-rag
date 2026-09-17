@@ -114,6 +114,33 @@ async def dependency_healthz(
     return {"status": "ok", "checks": checks}
 
 
+@app.get("/healthz/runtime")
+async def runtime_healthz(
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Authenticated diagnostics for Telegram runtime initialization stages."""
+    settings = get_settings()
+    expected = settings.secrets.telegram_webhook_secret
+    if not expected or not x_telegram_bot_api_secret_token or not hmac.compare_digest(x_telegram_bot_api_secret_token, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        runtime = WebRuntime(settings)
+    except Exception as exc:
+        log.exception("Runtime constructor failed (%s)", type(exc).__name__)
+        return {"status": "error", "stage": "constructor", "error_type": type(exc).__name__}
+    try:
+        await runtime.startup()
+    except Exception as exc:
+        log.exception("Runtime startup failed (%s)", type(exc).__name__)
+        return {"status": "error", "stage": "startup", "error_type": type(exc).__name__}
+    try:
+        await runtime.shutdown()
+    except Exception as exc:
+        log.exception("Runtime shutdown failed (%s)", type(exc).__name__)
+        return {"status": "error", "stage": "shutdown", "error_type": type(exc).__name__}
+    return {"status": "ok"}
+
+
 @app.post("/telegram/webhook")
 async def telegram_webhook(
     request: Request,
