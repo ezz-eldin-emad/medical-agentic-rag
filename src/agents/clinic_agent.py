@@ -10,6 +10,8 @@ import tempfile
 import threading
 import uuid
 from typing import Any
+from src.llm.client import LLMClient
+from pathlib import Path
 
 from src.config import AppSettings, get_settings
 _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
@@ -17,13 +19,14 @@ _WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
 
 
 class ClinicAgent:
-    """Read clinic facts directly and mutate only the local bookings JSON."""
+    """Read clinic facts from Qdrant and persist bookings in Qdrant state."""
 
     _lock = threading.RLock()
 
-    def __init__(self, clinic_path: Path | None = None, bookings_path: Path | None = None, settings: AppSettings | None = None, booking_store: Any | None = None) -> None:
+    def __init__(self, clinic_path: Path | None = None, bookings_path: Path | None = None, settings: AppSettings | None = None, booking_store: Any | None = None, llm_client: LLMClient | None = None) -> None:
         app_settings = settings or get_settings()
         self.settings = app_settings
+        self.llm_client = llm_client or LLMClient(default_model=app_settings.llm.generator_model, settings=app_settings)
         self.booking_store = booking_store
         if self.booking_store is None and bookings_path is None and app_settings.runtime.state_backend == "qdrant":
             from src.state import QdrantStateStore
@@ -82,6 +85,13 @@ class ClinicAgent:
 
     def lookup(self, *, intent: str = "clinic_info", entities: dict[str, Any] | None = None) -> dict[str, Any]:
         entities = entities or {}
+        if self.booking_store is None and not self.clinic.get("_chunks"):
+            doctors = self._doctors(entities)
+            if intent == "availability":
+                day = self._weekday(entities)
+                rows = [{"doctor": d.get("name"), "specialization": d.get("specialization"), "day": day, "slots": d.get("schedule", {}).get(day, []) if day else d.get("schedule", {})} for d in doctors]
+                return {"route": "clinic_query", "answer": self._format_availability(rows, day), "data": self.clinic, "citations": []}
+            return {"route": "clinic_query", "answer": self._format_info(), "data": self.clinic, "citations": []}
         doctors = self._doctors(entities)
         if intent == "availability":
             day = self._weekday(entities)
@@ -93,9 +103,32 @@ class ClinicAgent:
                 rows.append({"doctor": doctor.get("name"), "specialization": doctor.get("specialization"), "day": day, "slots": schedule.get(day, []) if day else schedule})
             return {"route": "clinic_query", "answer": self._format_availability(rows, day), "data": {"doctors": rows}, "citations": []}
 
-        if intent in {"clinic_info", "availability"}:
-            return {"route": "clinic_query", "answer": self._format_info(), "data": self.clinic, "citations": []}
-        return {"route": "clinic_query", "answer": self._format_info(), "data": self.clinic, "citations": []}
+        answer = self._llm_lookup(intent, entities, self._relevant_chunks(entities))
+        return {"route": "clinic_query", "answer": answer, "data": {"intent": intent}, "citations": []}
+
+    def _relevant_chunks(self, entities: dict[str, Any]) -> list[str]:
+        chunks = [str(x) for x in self.clinic.get("_chunks", []) if str(x).strip()]
+        terms = [self._norm(v) for v in entities.values() if isinstance(v, str) and v.strip()]
+        if not terms:
+            return chunks[:8]
+        selected = [c for c in chunks if any(t in self._norm(c) for t in terms)]
+        return selected[:12] or chunks[:4]
+
+    def _llm_lookup(self, intent: str, entities: dict[str, Any], chunks: list[str]) -> str:
+        prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "agents" / "clinic_answer.txt"
+        system = prompt_path.read_text(encoding="utf-8")
+        user = f"INTENT: {intent}\nENTITIES: {entities}\nDATA:\n" + "\n\n---\n\n".join(chunks)
+        try:
+            response = self.llm_client.complete(
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                model=self.settings.llm.generator_model,
+                temperature=0,
+                num_retries=1,
+            )
+            text = str(response.choices[0].message.content or "").strip()
+            return text[:2000] if text else "لا توجد معلومات كافية في سجلات العيادة لهذا السؤال."
+        except Exception:
+            return "لا أستطيع الوصول إلى معلومات العيادة الآن. حاول مرة أخرى لاحقًا."
 
     def _format_info(self) -> str:
         if self.clinic.get("_chunks"):

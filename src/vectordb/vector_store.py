@@ -1,11 +1,11 @@
 """
 Module: vector_store.py
 Purpose: Encode medical & clinic chunks with BGE-M3 and index them
-         into local Qdrant or a configured Qdrant server.
+         into the configured Qdrant Cloud collections.
 
 Usage:
-    # Index locally with the local FlagEmbedding backend
-    python -m src.vectordb.vector_store --local
+    # Index cloud collections with Hugging Face Inference
+    python -m src.vectordb.vector_store --mode clean
     python -m src.vectordb.vector_store --mode clean
     python -m src.vectordb.vector_store --chunks-file data/chunks/chunks_v2.json --batch-size 64
 """
@@ -42,8 +42,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     p = argparse.ArgumentParser(
         description=(
-            "Index medical/clinic chunks into local Qdrant or a configured Qdrant server. "
-            "The --local flag forces on-disk Qdrant and local FlagEmbedding."
+            "Index medical/clinic chunks into the configured Qdrant Cloud collections."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -81,17 +80,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--collection-prefix",
         default="",
         help="Optional prefix for collection names (e.g. 'staging_').",
-    )
-    p.add_argument(
-        "--fp16",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Use FP16 for the local embedding model (defaults to BGE_USE_FP16)."
-    )
-    p.add_argument(
-        "--local",
-        action="store_true",
-        help="Force local FlagEmbedding and the on-disk Qdrant database.",
     )
     return p.parse_args(argv)
 
@@ -325,8 +313,6 @@ def main(argv: list[str] | None = None) -> None:
     """Entry point — parse args, load env, encode, and index."""
     args = parse_args(argv)
     settings = get_settings()
-    if args.local:
-        settings = settings.for_local()
 
     root = settings.project_root
     git_commit = get_git_commit()
@@ -335,10 +321,10 @@ def main(argv: list[str] | None = None) -> None:
 
     backend = settings.embedding.backend.strip().lower()
 
-    if backend not in {"modal", "modal_api", "remote", "huggingface", "hf", "hf_inference", "local", "flag", "flagembedding"}:
+    if backend not in {"huggingface", "hf", "hf_inference"}:
         log.error(
             "Unknown or unsupported EMBEDDER_BACKEND=%r. "
-            "Supported backends: 'local', 'modal', or 'huggingface'.",
+            "Supported backend: 'huggingface'.",
             backend,
         )
         sys.exit(1)

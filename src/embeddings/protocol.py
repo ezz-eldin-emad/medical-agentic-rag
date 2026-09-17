@@ -1,4 +1,4 @@
-"""Shared embedding contracts for local and API backends."""
+"""Shared embedding contracts for the API embedding backend."""
 
 from __future__ import annotations
 

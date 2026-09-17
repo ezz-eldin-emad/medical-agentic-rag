@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "medical-agentic-rag"
 version = "0.1.0"
-description = "Local-first medical RAG system with configurable cloud LLM and embedding backends"
+description = "Cloud medical RAG Telegram demo using Vercel, Qdrant Cloud, Hugging Face, and Groq"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -21,12 +21,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-local-ml = [
-    "torch==2.13.0+cpu",
-    "torchvision==0.28.0+cpu",
-    "FlagEmbedding>=1.2.0",
-    "huggingface-hub>=0.23.0",
-]
 ingestion = [
     "beautifulsoup4>=4.12.0",
     "langchain-text-splitters>=0.0.1",
@@ -36,9 +30,6 @@ ingestion = [
 observability = [
     "arize-phoenix-otel>=0.16.0",
     "arize-phoenix>=13.14.0",
-]
-modal = [
-    "modal>=0.62.0",
 ]
 
 
@@ -53,15 +44,6 @@ dev = [
 packages = ["src"]
 
 [tool.uv]
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-torchvision = { index = "pytorch-cpu" }
 
 [tool.vercel]
 entrypoint = "src.web.app:app"

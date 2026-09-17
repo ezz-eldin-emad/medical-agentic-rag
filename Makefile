@@ -3,16 +3,16 @@
 PYTHON ?= .venv/bin/python
 
 install:
-	uv sync --extra local-ml --extra ingestion
+	uv sync --extra ingestion
 
 check:
-	$(PYTHON) main.py --check --local
+	$(PYTHON) main.py --check
 
 bot:
 	$(PYTHON) main.py --bot
 
 index:
-	$(PYTHON) -m src.vectordb.vector_store --local
+	$(PYTHON) -m src.vectordb.vector_store --mode clean
 
 test:
 	$(PYTHON) -m pytest -q

@@ -28,11 +28,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Run startup checks for configuration, Qdrant, and the indexed collection, then exit.",
     )
-    parser.add_argument(
-        "--local",
-        action="store_true",
-        help="Force local on-disk Qdrant and local BGE-M3, ignoring cloud backend settings.",
-    )
     return parser.parse_args(argv)
 
 
@@ -95,9 +90,6 @@ def main(argv: list[str] | None = None) -> None:
     _ensure_project_interpreter()
     settings = get_settings()
     args = _parse_args(argv)
-
-    if args.local:
-        settings = settings.for_local()
 
     if args.check:
         try:

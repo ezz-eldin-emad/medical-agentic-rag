@@ -7,7 +7,7 @@ environment values taking precedence over the local ``.env`` file.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import lru_cache
 import os
 from pathlib import Path
@@ -62,7 +62,7 @@ class LLMSettings:
 
 @dataclass(frozen=True)
 class EmbeddingSettings:
-    backend: str = "local"
+    backend: str = "huggingface"
     model_id: str = "BAAI/bge-m3"
     revision: str = ""
     use_fp16: bool = False
@@ -84,9 +84,9 @@ class VectorDBSettings:
 class RuntimeSettings:
     """Transport and persistence choices that vary by deployment."""
 
-    telegram_transport: str = "polling"
+    telegram_transport: str = "webhook"
     public_base_url: str = ""
-    state_backend: str = "local"
+    state_backend: str = "qdrant"
 
 
 @dataclass(frozen=True)
@@ -131,22 +131,13 @@ class AppSettings:
     def resolve_path(self, path: Path) -> Path:
         return path if path.is_absolute() else self.project_root / path
 
-    def for_local(self) -> "AppSettings":
-        """Return CLI-local overrides without mutating process environment."""
-        return replace(
-            self,
-            embedding=replace(self.embedding, backend="local", use_fp16=False),
-            vectordb=replace(self.vectordb, qdrant_url=""),
-            runtime=replace(self.runtime, telegram_transport="polling", state_backend="local"),
-        )
-
 
 @lru_cache(maxsize=1)
 def get_settings() -> AppSettings:
     """Build and cache validated settings from defaults plus allowed overrides."""
     load_env()
     root = get_project_root()
-    backend = _env("EMBEDDER_BACKEND", "local").casefold()
+    backend = _env("EMBEDDER_BACKEND", "huggingface").casefold()
     if backend not in {"local", "modal", "modal_api", "remote", "huggingface", "hf", "hf_inference", "flag", "flagembedding"}:
         raise ValueError(f"Unsupported EMBEDDER_BACKEND={backend!r}")
     return AppSettings(
@@ -185,8 +176,8 @@ def get_settings() -> AppSettings:
             collector_endpoint=_env("PHOENIX_COLLECTOR_ENDPOINT"),
         ),
         runtime=RuntimeSettings(
-            telegram_transport=_env("TELEGRAM_TRANSPORT", "polling").casefold(),
+        telegram_transport=_env("TELEGRAM_TRANSPORT", "webhook").casefold(),
             public_base_url=_env("PUBLIC_BASE_URL"),
-            state_backend=_env("STATE_BACKEND", "local").casefold(),
+        state_backend=_env("STATE_BACKEND", "qdrant").casefold(),
         ),
     )

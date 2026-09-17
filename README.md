@@ -1,188 +1,80 @@
 # Medical Agentic RAG
 
-A medical-information RAG demo with a local polling mode and a no-card Vercel webhook deployment. It is educational only and must not be used for diagnosis or clinical decisions.
-
-Telegram and source scraping still require network access. AWS Lambda, API Gateway, and SQS are not part of the runtime.
+Educational Telegram assistant combining agentic routing, evidence-grounded medical retrieval, and clinic services. Portfolio demonstration only—not a diagnostic or clinical-care system.
 
 ## Architecture
 
 ```text
-Telegram Bot API
-        │ polling (local) or HTTPS webhook (Vercel)
-        ▼
-local Python process
-   ├── Hugging Face BGE-M3 Inference (Vercel) or local BGE-M3 (development)
-   ├── Qdrant Cloud (Vercel) or local Qdrant (development)
-   └── Groq/Gemini/etc. LLM API through LiteLLM
+Telegram → FastAPI webhook (Vercel) → Orchestrator
+                                      ├─ safety and routing agents
+                                      ├─ Qdrant medical_kb / clinic_kb
+                                      ├─ Hugging Face embeddings
+                                      └─ Groq LLM agents
 ```
 
-| Component | Default | Supported alternative |
-| --- | --- | --- |
-| Telegram adapter | Local polling process | None; Telegram is external |
-| Qdrant | Local on-disk database | Local Qdrant server or Qdrant Cloud |
-| BGE-M3 | Local FlagEmbedding | Modal GPU endpoint |
-| Rewriter/generator | Groq/Gemini API | Any LiteLLM-compatible provider |
+The supported runtime uses Qdrant Cloud, Hugging Face Inference API with `intfloat/multilingual-e5-large`, and Groq through LiteLLM.
 
-Medical responses use one structured internal result with separate renderers:
-the Telegram user receives only the safe patient response, while validated
-evidence IDs, claims, retrieval details, prompts, scores, and evaluations stay
-internal for audit and Phoenix tracing. Citations are optional presentation
-data and are never generated from every retrieved chunk automatically.
+## Features
 
-## Install
+- Arabic/English medical-information questions with evidence-gated answers.
+- Clinic information, availability, booking, cancellation, and medical routes.
+- LLM-assisted clarification loop with structured context extraction.
+- Input sanitization, emergency routing, output guardrails, and safe rendering.
+- Persistent sessions, bookings, and Telegram update idempotency in Qdrant.
 
-Python 3.10+ is required.
+## Quick start
+
+Requirements: Python 3.12, [uv](https://docs.astral.sh/uv/), a Telegram bot token, and an LLM key.
 
 ```bash
-uv venv --python 3.11 .venv
-uv sync --extra local-ml --extra ingestion
+uv venv --python 3.12 .venv
+uv sync --extra ingestion
 cp .env.example .env
+./.venv/bin/python main.py --check
+./.venv/bin/python main.py --bot
 ```
 
-Run the application with the project interpreter. The dependency is named
-`python-telegram-bot`; do not install the unrelated package named `telegram`.
+The runtime requires the cloud environment variables described below.
 
-```bash
-./.venv/bin/python -c "import sys, telegram; print(sys.executable); print(telegram.__version__)"
-./.venv/bin/python main.py --check --local
-```
-
-If your shell prompt shows `(.venv)` but `python` still resolves to
-`/usr/bin/python`, it is using an old environment activation. From this
-project directory, run:
-
-```bash
-deactivate 2>/dev/null || true
-source .venv/bin/activate
-hash -r
-python -c "import sys; print(sys.executable)"
-python main.py --check --local
-```
-
-The printed interpreter must be inside this project's `.venv`. The explicit
-`./.venv/bin/python ...` form always bypasses stale shell activation. Avoid
-`uv run` for normal startup unless the environment is already synchronized;
-otherwise it may resolve and download the full ML dependency graph, including
-Torch.
-
-Set the Telegram token and the API key for the selected LLM provider. The example uses Groq:
-
-```env
-TELEGRAM_BOT_TOKEN=...
-GROQ_API_KEY=...
-```
-
-Application defaults—including model assignments, agent parameters, retrieval
-limits, paths, and timeouts—are centralized in `src/config/settings.py`.
-`.env` is reserved for credentials and deployment-specific endpoints/switches.
-To change a model or agent policy, edit the typed defaults in that file; do not
-add behavioral settings to `.env`.
-
-## Local-first configuration
-
-The simplest setup uses Qdrant's on-disk mode and local BGE-M3. It does not require Docker or a separate Qdrant process:
-
-```env
-QDRANT_PATH=data/qdrant
-EMBEDDER_BACKEND=local
-```
-
-The BGE-M3 model and FP16 defaults are configured centrally in
-`src/config/settings.py`.
-
-The first embedding run downloads BGE-M3 and loads it into the Python process. It needs several GB of disk/RAM and is slower on CPU. Use `BGE_USE_FP16=true` only with suitable GPU support.
-
-On-disk Qdrant is single-process storage. Index before starting the bot. If multiple processes must access Qdrant simultaneously, use the local server option:
-
-```bash
-docker run --name medical-qdrant -p 6333:6333 qdrant/qdrant
-```
-
-```env
-QDRANT_URL=http://localhost:6333
-QDRANT_API_KEY=
-```
-
-`--local` on the commands below applies in-memory settings overrides for
-on-disk Qdrant and local BGE-M3. It does not change the LLM provider.
-
-## Build the knowledge base
-
-Ingestion and indexing are separate from the Telegram runtime:
+## Indexing
 
 ```bash
 ./.venv/bin/python -m src.ingestion.loader
 ./.venv/bin/python -m src.ingestion.cleaner
-./.venv/bin/python -m src.ingestion.llm_cleaner
 ./.venv/bin/python -m src.chunking.chunker
-./.venv/bin/python -m src.vectordb.vector_store --local
+./.venv/bin/python -m src.vectordb.vector_store --mode clean
 ```
 
-The scrapers need internet access. The LLM cleaning stage uses the configured provider API. The chunk file is written to `data/chunks/chunks.json`.
-
-The indexer also supports mixed mode when `--local` is omitted: it follows `QDRANT_URL`, `QDRANT_PATH`, and `EMBEDDER_BACKEND` from `.env`.
-
-## Run and verify
-
-Check the local dependencies without loading BGE-M3 or calling the LLM:
+Cloud rebuild:
 
 ```bash
-./.venv/bin/python main.py --check --local
+export EMBEDDER_BACKEND=huggingface
+export HF_EMBED_MODEL=intfloat/multilingual-e5-large
+./.venv/bin/python -m src.vectordb.vector_store --mode clean
 ```
 
-Start the Telegram bot:
+Use the same embedding model for indexing and querying.
 
-```bash
-./.venv/bin/python main.py --bot --local
-```
+## Vercel deployment
 
-Keep the process running. In Telegram, try `/start`, `/status`, `/help`, and then a medical question. Stop it with `Ctrl-C`.
-
-You can also use the Makefile:
-
-```bash
-make install
-make index
-make check
-make bot
-```
-
-## Optional mixed embedding mode
-
-If local BGE-M3 is too slow or the machine lacks enough memory, keep the Python bot and Qdrant choice local while using a deployed Modal embedder:
-
-```env
-EMBEDDER_BACKEND=modal
-MODAL_EMBED_URL=https://your-endpoint.modal.run
-QDRANT_URL=http://localhost:6333
-QDRANT_API_KEY=
-```
-
-For Qdrant Cloud, replace `QDRANT_URL` and set `QDRANT_API_KEY`.
-
-## Vercel + Qdrant Cloud deployment
-
-The `pyproject.toml` entrypoint is `src.web.app:app`. Import the repository as
-a Vercel project, choose the Hobby plan, and set these variables manually
-(never commit their values):
+Entrypoint: `src.web.app:app`. Add these variables in Vercel; never commit their values:
 
 ```env
 TELEGRAM_TRANSPORT=webhook
-PUBLIC_BASE_URL=https://<service>.vercel.app
+PUBLIC_BASE_URL=https://<project>.vercel.app
 TELEGRAM_WEBHOOK_SECRET=<random-secret>
-STATE_BACKEND=qdrant
-QDRANT_URL=https://<cluster>.qdrant.io
-QDRANT_API_KEY=...
-QDRANT_STATE_COLLECTION=medical_app_state
+TELEGRAM_BOT_TOKEN=<telegram-token>
+GROQ_API_KEY=<groq-key>
 EMBEDDER_BACKEND=huggingface
-HF_TOKEN=...
+HF_TOKEN=<huggingface-token>
 HF_EMBED_MODEL=intfloat/multilingual-e5-large
-GROQ_API_KEY=...
-TELEGRAM_BOT_TOKEN=...
+QDRANT_URL=https://<cluster>.qdrant.io
+QDRANT_API_KEY=<qdrant-key>
+QDRANT_STATE_COLLECTION=medical_app_state
 PHOENIX_ENABLED=false
 ```
 
-Create the Telegram webhook after the Vercel deployment is healthy:
+After deployment, verify `/healthz`, then register the webhook:
 
 ```bash
 curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
@@ -192,46 +84,34 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   -d 'allowed_updates=["message"]'
 ```
 
-Vercel functions are stateless and have execution/resource limits; persistent
-patient-session, booking, and Telegram idempotency state therefore uses the
-`medical_app_state` Qdrant collection. This is suitable for a portfolio demo,
-not an always-on or transaction-safe clinical service.
+Vercel may cold-start. This free-tier setup is for a low-traffic portfolio demo, not production clinical workloads.
 
-Modal deployment is optional for local experiments and is not required by the
-Vercel configuration.
+## Prompts and configuration
 
-## Troubleshooting
+Typed defaults live in `src/config/settings.py`. All editable prompt templates live under `prompts/`, separately from agent logic.
 
-- **Missing `medical_kb`:** run the indexer and confirm that the collection exists.
-- **BGE-M3 is too slow or runs out of memory:** use a machine with more RAM/GPU, re-index with a smaller compatible model, or use Modal.
-- **LLM authentication errors:** match the model prefix to its key (`groq/...` with `GROQ_API_KEY`, `gemini/...` with `GEMINI_API_KEY`, and so on).
-- **No Telegram response:** keep the local polling process running and allow outbound access to the Telegram Bot API.
-- **`No module named 'telegram'` or wrong Telegram package:** activate/use `.venv`, uninstall `telegram`, then install `python-telegram-bot` with `uv pip --python .venv/bin/python`. Do not launch with system `/usr/bin/python`.
-- **Stale cloud settings:** use `--local` or remove old `QDRANT_URL`, `MODAL_EMBED_URL`, and `EMBEDDER_BACKEND` values from `.env`.
+## Tests
 
-## Project structure
+```bash
+./.venv/bin/python -m pytest -q
+```
+
+## Project layout
 
 ```text
-medical-agentic-rag/
-├── main.py                 # Local Telegram runtime and startup check
-├── modal/app.py            # Optional Modal BGE-M3 deployment
-├── prompts/                # Cleaning and RAG prompts
-├── src/
-│   ├── adapters/           # Telegram polling/webhook adapter
-│   ├── agents/             # Orchestrator, clinic, safety, documentation, and tracing
-│   ├── config/             # Central typed application settings
-│   ├── chunking/           # Semantic chunking
-│   ├── embeddings/         # Local and optional Modal BGE-M3 backends
-│   ├── ingestion/          # Scrapers and cleaning stages
-│   ├── llm/                # LiteLLM client and configuration
-│   ├── guardrails/         # Input sanitization and query classification
-│   ├── memory/             # Local or Qdrant-backed sanitized context
-│   ├── state/              # Qdrant persistent app state
-│   ├── web/                # FastAPI Vercel webhook entrypoint
-│   ├── observability/      # Phoenix/OpenTelemetry tracing seam
-│   ├── rag/                # Retrieval, relevance gate, provenance, generation
-│   ├── response/           # Patient and internal response renderers
-│   ├── utils/              # Environment, logging, and shared helpers
-│   └── vectordb/           # Qdrant indexing
-└── data/                   # Generated data and local Qdrant storage (gitignored)
+main.py                 Local CLI/runtime
+src/web                 FastAPI webhook
+src/adapters            Telegram integration
+src/agents              Orchestrator and domain agents
+src/guardrails          Sanitization and routing
+src/rag                 Retrieval and generation
+src/embeddings          Embedding backends
+src/state, src/memory   Persistent and local state
+src/vectordb             Qdrant indexing
+prompts                 All prompt templates
+data                    Generated local artifacts (gitignored)
 ```
+
+## Safety and privacy
+
+Do not use real patient identifiers or medical records. Never expose API keys in logs, screenshots, commits, or issue reports. Responses are educational and do not replace a qualified healthcare professional.
