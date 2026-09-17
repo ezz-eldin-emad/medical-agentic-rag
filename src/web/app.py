@@ -7,6 +7,9 @@ import hmac
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from src.utils.helpers import setup_logging
+
+log = setup_logging("web.app")
 
 from src.config import AppSettings, get_settings
 
@@ -76,21 +79,29 @@ async def telegram_webhook(
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
 ) -> dict[str, str]:
     runtime: WebRuntime | None = getattr(request.app.state, "runtime", None)
-    if runtime is None:
-        runtime = WebRuntime(get_settings())
-        await runtime.startup()
-        request.app.state.runtime = runtime
-    expected = runtime.settings.secrets.telegram_webhook_secret
-    if not expected or not x_telegram_bot_api_secret_token or not hmac.compare_digest(
-        x_telegram_bot_api_secret_token, expected
-    ):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        if runtime is None:
+            runtime = WebRuntime(get_settings())
+            await runtime.startup()
+            request.app.state.runtime = runtime
+        expected = runtime.settings.secrets.telegram_webhook_secret
+        if not expected or not x_telegram_bot_api_secret_token or not hmac.compare_digest(
+            x_telegram_bot_api_secret_token, expected
+        ):
+            raise HTTPException(status_code=401, detail="Unauthorized")
 
-    from telegram import Update
+        from telegram import Update
 
-    payload = await request.json()
-    update = Update.de_json(payload, runtime.bot.app.bot)
-    if update is None:
-        raise HTTPException(status_code=400, detail="Invalid Telegram update")
-    await runtime.bot.process_webhook_update(update)
-    return {"status": "accepted"}
+        payload = await request.json()
+        update = Update.de_json(payload, runtime.bot.app.bot)
+        if update is None:
+            raise HTTPException(status_code=400, detail="Invalid Telegram update")
+        await runtime.bot.process_webhook_update(update)
+        return {"status": "accepted"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Keep user/Telegram response generic while preserving a type-only
+        # diagnostic in Vercel logs; never log secrets or request payloads.
+        log.exception("Webhook invocation failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Webhook processing failed") from exc
