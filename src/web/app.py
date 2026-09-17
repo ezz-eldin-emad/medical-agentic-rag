@@ -84,6 +84,36 @@ async def healthz(request: Request) -> dict[str, Any]:
     return {"status": "ok", "transport": "webhook", "qdrant_state_collection": runtime.state_store.collection_name}
 
 
+@app.get("/healthz/dependencies")
+async def dependency_healthz(
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Authenticated, non-secret diagnostics for deployment troubleshooting."""
+    settings = get_settings()
+    expected = settings.secrets.telegram_webhook_secret
+    if not expected or not x_telegram_bot_api_secret_token or not hmac.compare_digest(x_telegram_bot_api_secret_token, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    checks: dict[str, Any] = {}
+    for name in ("telegram", "qdrant_client", "numpy", "requests"):
+        try:
+            __import__(name)
+            checks[name] = True
+        except Exception as exc:
+            checks[name] = type(exc).__name__
+    try:
+        from src.rag.retriever import connect_qdrant
+        client, _ = connect_qdrant(settings.vectordb.medical_collection, settings)
+        checks["medical_kb"] = settings.vectordb.medical_collection in {
+            item.name for item in client.get_collections().collections
+        }
+        checks["state_collection"] = settings.vectordb.state_collection in {
+            item.name for item in client.get_collections().collections
+        }
+    except Exception as exc:
+        checks["qdrant"] = type(exc).__name__
+    return {"status": "ok", "checks": checks}
+
+
 @app.post("/telegram/webhook")
 async def telegram_webhook(
     request: Request,
