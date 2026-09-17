@@ -69,6 +69,16 @@ async def healthz(request: Request) -> dict[str, Any]:
             "transport": settings.runtime.telegram_transport,
             "state_backend": settings.runtime.state_backend,
             "configured": bool(settings.runtime.public_base_url and settings.secrets.telegram_webhook_secret),
+            "checks": {
+                "public_base_url": bool(settings.runtime.public_base_url),
+                "webhook_secret": bool(settings.secrets.telegram_webhook_secret),
+                "telegram_token": bool(settings.secrets.telegram_bot_token),
+                "qdrant_url": bool(settings.vectordb.qdrant_url),
+                "qdrant_api_key": bool(settings.secrets.qdrant_api_key),
+                "modal_url": bool(settings.embedding.modal_url),
+                "modal_token": bool(settings.secrets.modal_embed_token),
+                "groq_api_key": bool(settings.secrets.groq_api_key),
+            },
         }
     return {"status": "ok", "transport": "webhook", "qdrant_state_collection": runtime.state_store.collection_name}
 
