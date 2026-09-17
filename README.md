@@ -1,6 +1,6 @@
 # Medical Agentic RAG
 
-A medical-information RAG demo with a local polling mode and a no-card Render webhook deployment. It is educational only and must not be used for diagnosis or clinical decisions.
+A medical-information RAG demo with a local polling mode and a no-card Vercel webhook deployment. It is educational only and must not be used for diagnosis or clinical decisions.
 
 Telegram and source scraping still require network access. AWS Lambda, API Gateway, and SQS are not part of the runtime.
 
@@ -8,11 +8,11 @@ Telegram and source scraping still require network access. AWS Lambda, API Gatew
 
 ```text
 Telegram Bot API
-        │ polling (local) or HTTPS webhook (Render)
+        │ polling (local) or HTTPS webhook (Vercel)
         ▼
 local Python process
-   ├── Modal BGE-M3 (Render) or local BGE-M3 (development)
-   ├── Qdrant Cloud (Render) or local Qdrant (development)
+   ├── Modal BGE-M3 (Vercel) or local BGE-M3 (development)
+   ├── Qdrant Cloud (Vercel) or local Qdrant (development)
    └── Groq/Gemini/etc. LLM API through LiteLLM
 ```
 
@@ -160,14 +160,15 @@ QDRANT_API_KEY=
 
 For Qdrant Cloud, replace `QDRANT_URL` and set `QDRANT_API_KEY`.
 
-## Render + Qdrant Cloud deployment
+## Vercel + Qdrant Cloud deployment
 
-The committed `render.yaml` starts FastAPI with `uv sync --locked --no-dev`.
-Set these variables manually in Render (never commit their values):
+The `pyproject.toml` entrypoint is `src.web.app:app`. Import the repository as
+a Vercel project, choose the Hobby plan, and set these variables manually
+(never commit their values):
 
 ```env
 TELEGRAM_TRANSPORT=webhook
-PUBLIC_BASE_URL=https://<service>.onrender.com
+PUBLIC_BASE_URL=https://<service>.vercel.app
 TELEGRAM_WEBHOOK_SECRET=<random-secret>
 STATE_BACKEND=qdrant
 QDRANT_URL=https://<cluster>.qdrant.io
@@ -181,7 +182,7 @@ TELEGRAM_BOT_TOKEN=...
 PHOENIX_ENABLED=false
 ```
 
-Create the Telegram webhook after the Render service is healthy:
+Create the Telegram webhook after the Vercel deployment is healthy:
 
 ```bash
 curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
@@ -191,7 +192,7 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   -d 'allowed_updates=["message"]'
 ```
 
-Render Free sleeps after inactivity and has an ephemeral filesystem; persistent
+Vercel functions are stateless and have execution/resource limits; persistent
 patient-session, booking, and Telegram idempotency state therefore uses the
 `medical_app_state` Qdrant collection. This is suitable for a portfolio demo,
 not an always-on or transaction-safe clinical service.
@@ -231,7 +232,7 @@ medical-agentic-rag/
 │   ├── guardrails/         # Input sanitization and query classification
 │   ├── memory/             # Local or Qdrant-backed sanitized context
 │   ├── state/              # Qdrant persistent app state
-│   ├── web/                # FastAPI Render webhook entrypoint
+│   ├── web/                # FastAPI Vercel webhook entrypoint
 │   ├── observability/      # Phoenix/OpenTelemetry tracing seam
 │   ├── rag/                # Retrieval, relevance gate, provenance, generation
 │   ├── response/           # Patient and internal response renderers

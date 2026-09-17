@@ -1,7 +1,7 @@
 """Small keyed state store backed by the configured Qdrant instance.
 
 The medical knowledge collection remains vector-search data. This collection
-stores only demo session/booking/update payloads, allowing the Render
+stores only demo session/booking/update payloads, allowing the Vercel
 filesystem to stay ephemeral without introducing another hosted database.
 """
 

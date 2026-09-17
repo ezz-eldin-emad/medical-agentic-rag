@@ -1,4 +1,4 @@
-"""FastAPI entrypoint for the no-card Render deployment."""
+"""FastAPI entrypoint for the no-card Vercel deployment."""
 
 from __future__ import annotations
 
@@ -17,13 +17,13 @@ class WebRuntime:
     def __init__(self, settings: AppSettings) -> None:
         self.settings = settings
         if settings.runtime.telegram_transport != "webhook":
-            raise RuntimeError("Render HTTP runtime requires TELEGRAM_TRANSPORT=webhook")
+            raise RuntimeError("Vercel HTTP runtime requires TELEGRAM_TRANSPORT=webhook")
         if not settings.runtime.public_base_url:
             raise RuntimeError("PUBLIC_BASE_URL is required for webhook deployment")
         if not settings.secrets.telegram_webhook_secret:
             raise RuntimeError("TELEGRAM_WEBHOOK_SECRET is required for webhook deployment")
         if settings.runtime.state_backend != "qdrant":
-            raise RuntimeError("Render HTTP runtime requires STATE_BACKEND=qdrant")
+            raise RuntimeError("Vercel HTTP runtime requires STATE_BACKEND=qdrant")
         self.state_store = QdrantStateStore.from_settings(settings)
         self.bot = TelegramBotAdapter(settings=settings, update_store=self.state_store)
 
