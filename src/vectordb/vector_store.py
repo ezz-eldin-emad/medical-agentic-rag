@@ -335,10 +335,10 @@ def main(argv: list[str] | None = None) -> None:
 
     backend = settings.embedding.backend.strip().lower()
 
-    if backend not in {"modal", "modal_api", "remote", "local", "flag", "flagembedding"}:
+    if backend not in {"modal", "modal_api", "remote", "huggingface", "hf", "hf_inference", "local", "flag", "flagembedding"}:
         log.error(
             "Unknown or unsupported EMBEDDER_BACKEND=%r. "
-            "Supported backends: 'local' (default FlagEmbedding) or 'modal'.",
+            "Supported backends: 'local', 'modal', or 'huggingface'.",
             backend,
         )
         sys.exit(1)

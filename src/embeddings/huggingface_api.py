@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import os
 from typing import Any
 
 import numpy as np
@@ -16,7 +17,7 @@ class HuggingFaceInferenceEmbedder:
 
     def __init__(self, *, settings: AppSettings | None = None, timeout: float = 90.0, max_retries: int = 3) -> None:
         app_settings = settings or get_settings()
-        self.model_id = app_settings.embedding.model_id
+        self.model_id = os.environ.get("HF_EMBED_MODEL", "intfloat/multilingual-e5-large").strip() or app_settings.embedding.model_id
         self.timeout = timeout
         self.max_retries = max_retries
         self.token = app_settings.secrets.hf_token
@@ -41,7 +42,7 @@ class HuggingFaceInferenceEmbedder:
                 if getattr(getattr(exc, "response", None), "status_code", None) in {401, 403}:
                     raise RuntimeError("Hugging Face embedding authorization failed") from exc
                 time.sleep(min(2**attempt, 8))
-        raise RuntimeError("Hugging Face embedding request failed") from last_error
+        raise RuntimeError(f"Hugging Face embedding request failed for model {self.model_id}") from last_error
 
     def encode(self, texts: list[str], batch_size: int = 32) -> EmbeddingResult:
         if not texts:

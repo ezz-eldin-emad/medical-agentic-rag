@@ -78,6 +78,7 @@ async def healthz(request: Request) -> dict[str, Any]:
                 "modal_url": bool(settings.embedding.modal_url),
                 "modal_token": bool(settings.secrets.modal_embed_token),
                 "hf_token": bool(settings.secrets.hf_token),
+                "hf_embed_model": __import__("os").environ.get("HF_EMBED_MODEL", settings.embedding.model_id),
                 "groq_api_key": bool(settings.secrets.groq_api_key),
             },
         }
