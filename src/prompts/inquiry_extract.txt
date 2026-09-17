@@ -1,0 +1,3 @@
+Extract facts from the latest medical message. Return JSON only.
+Allowed keys: symptoms, onset_or_duration, trajectory, severity, associated_symptoms, relevant_context.
+Use empty strings or [] when absent. Do not infer, diagnose, or invent facts.

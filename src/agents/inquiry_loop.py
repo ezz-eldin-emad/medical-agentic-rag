@@ -9,6 +9,7 @@ from typing import Any
 from src.config import AppSettings, get_settings
 from src.llm.client import LLMClient
 from src.memory import PatientContext, PatientContextManager
+from src.prompts import load as load_prompt
 
 
 class InquiryLoop:
@@ -93,9 +94,7 @@ class InquiryLoop:
         """Extract only known context fields as JSON using the clarification model."""
         import json
         prompt = (
-            "Extract facts from the user's latest medical message. Return JSON only, no markdown. "
-            "Allowed keys: symptoms, onset_or_duration, trajectory, severity, associated_symptoms, relevant_context. "
-            "Use empty strings or [] when a value is not present. Do not infer or diagnose.\n"
+            load_prompt("inquiry_extract") + "\n"
             f"Existing context: {current.to_dict()}\nLatest message: {query}"
         )
         try:

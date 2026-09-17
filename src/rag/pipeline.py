@@ -71,7 +71,12 @@ class MedicalRAGPipeline:
 
         with self.tracer.span("medical_request", {"request_id": request_id}) as root_span:
             with self.tracer.span("input_guardrails", {"request_id": request_id}) as guard_span:
-                sanitization = self.sanitizer.sanitize(query)
+                # The orchestrator may append structured context (including
+                # numeric severity/age) to the already-sanitized user text.
+                # Re-sanitize only the user question portion; scanning the
+                # internal context can falsely classify it as a phone/card.
+                user_query_for_guard = query.split("\nStructured patient context:", 1)[0]
+                sanitization = self.sanitizer.sanitize(user_query_for_guard)
                 guard_span["allowed"] = sanitization.allowed
                 guard_span["pii_detected"] = sanitization.pii_detected
                 guard_span["prompt_injection_detected"] = sanitization.prompt_injection_detected
