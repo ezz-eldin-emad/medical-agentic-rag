@@ -2,14 +2,25 @@
 
 Educational Telegram assistant combining agentic routing, evidence-grounded medical retrieval, and clinic services. Portfolio demonstration only—not a diagnostic or clinical-care system.
 
+**Try the Telegram bot:** [@MedicalRag_bot](https://t.me/MedicalRag_bot)
+
 ## Architecture
 
 ```text
-Telegram → FastAPI webhook (Vercel) → Orchestrator
-                                      ├─ safety and routing agents
-                                      ├─ Qdrant medical_kb / clinic_kb
-                                      ├─ Hugging Face embeddings
-                                      └─ Groq LLM agents
+Telegram → FastAPI webhook (Vercel) → Agent Orchestrator
+                                      ├─ Input Guardrail / Sanitizer
+                                      ├─ Query Classifier Agent (LLM)
+                                      │    ├─ Emergency → Safety Agent
+                                      │    ├─ Clinic → Clinic Agent (retrieve + answer)
+                                      │    └─ Medical → Documentation Agent
+                                      │                         ├─ Query Rewriter Agent (LLM)
+                                      │                         ├─ HF Embedding API
+                                      │                         ├─ Qdrant medical_kb retrieval
+                                      │                         ├─ Evidence / relevance gate
+                                      │                         └─ Generator Agent (LLM)
+                                      ├─ Inquiry Agent (LLM extraction + follow-up loop)
+                                      ├─ Output Guardrail
+                                      └─ Safe Telegram response
 ```
 
 The supported runtime uses Qdrant Cloud, Hugging Face Inference API with `intfloat/multilingual-e5-large`, and Groq through LiteLLM.
