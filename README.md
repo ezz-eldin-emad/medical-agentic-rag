@@ -11,7 +11,7 @@ Telegram Bot API
         │ polling (local) or HTTPS webhook (Vercel)
         ▼
 local Python process
-   ├── Modal BGE-M3 (Vercel) or local BGE-M3 (development)
+   ├── Hugging Face BGE-M3 Inference (Vercel) or local BGE-M3 (development)
    ├── Qdrant Cloud (Vercel) or local Qdrant (development)
    └── Groq/Gemini/etc. LLM API through LiteLLM
 ```
@@ -174,9 +174,8 @@ STATE_BACKEND=qdrant
 QDRANT_URL=https://<cluster>.qdrant.io
 QDRANT_API_KEY=...
 QDRANT_STATE_COLLECTION=medical_app_state
-EMBEDDER_BACKEND=modal
-MODAL_EMBED_URL=https://<modal-endpoint>
-MODAL_EMBED_TOKEN=...
+EMBEDDER_BACKEND=huggingface
+HF_TOKEN=...
 GROQ_API_KEY=...
 TELEGRAM_BOT_TOKEN=...
 PHOENIX_ENABLED=false
@@ -197,13 +196,8 @@ patient-session, booking, and Telegram idempotency state therefore uses the
 `medical_app_state` Qdrant collection. This is suitable for a portfolio demo,
 not an always-on or transaction-safe clinical service.
 
-The Modal deployment is optional:
-
-```bash
-./.venv/bin/python -m pip install -e '.[modal]'
-modal setup
-modal deploy modal/app.py
-```
+Modal deployment is optional for local experiments and is not required by the
+Vercel configuration.
 
 ## Troubleshooting
 

@@ -147,7 +147,7 @@ def get_settings() -> AppSettings:
     load_env()
     root = get_project_root()
     backend = _env("EMBEDDER_BACKEND", "local").casefold()
-    if backend not in {"local", "modal", "modal_api", "remote", "flag", "flagembedding"}:
+    if backend not in {"local", "modal", "modal_api", "remote", "huggingface", "hf", "hf_inference", "flag", "flagembedding"}:
         raise ValueError(f"Unsupported EMBEDDER_BACKEND={backend!r}")
     return AppSettings(
         project_root=root,

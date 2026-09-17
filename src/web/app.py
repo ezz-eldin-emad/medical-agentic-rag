@@ -77,6 +77,7 @@ async def healthz(request: Request) -> dict[str, Any]:
                 "qdrant_api_key": bool(settings.secrets.qdrant_api_key),
                 "modal_url": bool(settings.embedding.modal_url),
                 "modal_token": bool(settings.secrets.modal_embed_token),
+                "hf_token": bool(settings.secrets.hf_token),
                 "groq_api_key": bool(settings.secrets.groq_api_key),
             },
         }
