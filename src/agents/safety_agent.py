@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from src.config import AppSettings, get_settings
@@ -11,6 +12,19 @@ class SafetyAgent:
 
     def __init__(self, clinic_path: Path | None = None, settings: AppSettings | None = None) -> None:
         app_settings = settings or get_settings()
+        if clinic_path is None and app_settings.runtime.state_backend == "qdrant":
+            self._clinic = {"clinic_info": {}}
+            try:
+                from src.rag.retriever import connect_qdrant
+                client, _ = connect_qdrant(app_settings.vectordb.clinic_collection, app_settings)
+                points, _ = client.scroll(collection_name=app_settings.vectordb.clinic_collection, limit=128, with_payload=True, with_vectors=False)
+                text = "\n".join(str((point.payload or {}).get("text", "")) for point in points)
+                match = re.search(r"Emergency:\s*([+\d ()-]{7,})", text, re.I)
+                if match:
+                    self._clinic["clinic_info"]["emergency_phone"] = match.group(1).strip()
+            except Exception:
+                pass
+            return
         path = clinic_path or app_settings.resolve_path(app_settings.agents.clinic_data_path)
         self._clinic = json.loads(path.read_text(encoding="utf-8"))
 
