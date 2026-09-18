@@ -34,10 +34,12 @@ class ClinicAgent:
             self.booking_store = QdrantStateStore.from_settings(app_settings)
         self.clinic_path = clinic_path or app_settings.resolve_path(app_settings.agents.clinic_data_path)
         self.bookings_path = bookings_path or app_settings.resolve_path(app_settings.agents.bookings_path)
-        if clinic_path is None and app_settings.runtime.state_backend == "qdrant":
+        if self.clinic_path.exists():
+            self.clinic = json.loads(self.clinic_path.read_text(encoding="utf-8"))
+        elif app_settings.runtime.state_backend == "qdrant":
             self.clinic = self._load_clinic_kb()
         else:
-            self.clinic = json.loads(self.clinic_path.read_text(encoding="utf-8"))
+            self.clinic = {"clinic_info": {}, "doctors": [], "services": [], "appointments_policy": {}}
 
     def _load_clinic_kb(self) -> dict[str, Any]:
         """Load the deployed clinic catalog from Qdrant chunks, not disk."""
@@ -62,14 +64,19 @@ class ClinicAgent:
 
     def _doctors(self, entities: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         entities = entities or {}
+        doctor_id = str(entities.get("doctor_id") or "").strip()
+        doctors = self.clinic.get("doctors", [])
+        if doctor_id:
+            matched = [d for d in doctors if d.get("id") == doctor_id]
+            if matched:
+                return matched
         terms = [self._norm(entities.get(key)) for key in ("doctor", "specialty")]
         terms = [term for term in terms if term]
-        doctors = self.clinic.get("doctors", [])
         if not terms:
             return doctors
         matched = []
         for doctor in doctors:
-            haystack = self._norm(" ".join(str(doctor.get(key, "")) for key in ("name", "name_en", "specialization", "specialization_en")))
+            haystack = self._norm(" ".join(str(doctor.get(key, "")) for key in ("name", "name_en", "specialization", "specialization_en", "id")))
             if all(term in haystack for term in terms):
                 matched.append(doctor)
         return matched

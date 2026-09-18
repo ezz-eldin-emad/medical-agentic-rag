@@ -36,11 +36,15 @@ class InquiryLoop:
         )
 
     def process(self, context_key: str, query: str, analysis: dict[str, Any]) -> dict[str, Any]:
-        current = self.context_manager.get(context_key) or PatientContext(
-            context_key=context_key,
-            session_id=uuid.uuid4().hex,
-            language=str(analysis.get("language") or "en"),
-        )
+        current = self.context_manager.get(context_key)
+        if current is not None and current.status in {"ready", "completed", "limit_reached"}:
+            current = None
+        if current is None:
+            current = PatientContext(
+                context_key=context_key,
+                session_id=uuid.uuid4().hex,
+                language=str(analysis.get("language") or "en"),
+            )
         updates = self._extract_updates(current, query)
         # Let the configured API model interpret natural-language answers
         # (Arabic date/duration expressions, severity, etc.). Deterministic
@@ -242,8 +246,20 @@ class InquiryLoop:
 
     @staticmethod
     def _augmented_query(query: str, context: PatientContext) -> str:
+        symptoms_str = ", ".join(context.symptoms) if context.symptoms else query
+        details = []
+        if context.onset_or_duration:
+            details.append(f"duration: {context.onset_or_duration}")
+        if context.severity:
+            details.append(f"severity: {context.severity}")
+        if context.associated_symptoms:
+            details.append(f"associated: {', '.join(context.associated_symptoms)}")
+        if context.relevant_context:
+            details.append(f"context: {context.relevant_context}")
+        clinical_summary = f"{symptoms_str} ({', '.join(details)})" if details else symptoms_str
+
         return (
-            f"User question: {query}\n"
+            f"User question: {clinical_summary} - {query}\n"
             f"Structured patient context: symptoms={context.symptoms}; "
             f"onset_or_duration={context.onset_or_duration}; trajectory={context.trajectory}; "
             f"severity={context.severity}; "

@@ -7,7 +7,7 @@ environment values taking precedence over the local ``.env`` file.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 import os
 from pathlib import Path
@@ -48,7 +48,7 @@ class SecretsSettings:
 @dataclass(frozen=True)
 class LLMSettings:
     default_model: str = "groq/openai/gpt-oss-20b"
-    classifier_model: str = "groq/openai/gpt-oss-20b"
+    classifier_model: str = "groq/allam-2-7b"
     rewriter_model: str = "groq/openai/gpt-oss-20b"
     generator_model: str = "groq/openai/gpt-oss-120b"
     temperature: float = 0.0
@@ -130,6 +130,15 @@ class AppSettings:
 
     def resolve_path(self, path: Path) -> Path:
         return path if path.is_absolute() else self.project_root / path
+
+    def for_local(self) -> "AppSettings":
+        """Return CLI-local overrides without mutating process environment."""
+        return replace(
+            self,
+            embedding=replace(self.embedding, backend="local", use_fp16=False),
+            vectordb=replace(self.vectordb, qdrant_url=""),
+            runtime=replace(self.runtime, telegram_transport="polling", state_backend="local"),
+        )
 
 
 @lru_cache(maxsize=1)

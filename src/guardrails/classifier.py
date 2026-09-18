@@ -38,9 +38,11 @@ class QueryClassifier:
     _EMERGENCY = (
         "can't breathe", "cannot breathe", "difficulty breathing", "chest pain",
         "unconscious", "not responding", "severe bleeding", "stroke", "seizure",
-        "suicide", "overdose", "anaphylaxis", "vomiting blood",
+        "suicide", "overdose", "anaphylaxis", "vomiting blood", "heart attack",
         "لا أستطيع التنفس", "صعوبة في التنفس", "ألم في الصدر", "نزيف شديد",
-        "فاقد الوعي", "سكتة دماغية", "تشنج", "جرعة زائدة", "حساسية شديدة",
+        "نزيف حاد", "فاقد الوعي", "فاقد للوعي", "سكتة دماغية", "جلطة", "جلطه",
+        "تشنج", "جرعة زائدة", "حساسية شديدة", "أزمة قلبية", "ازمة قلبية",
+        "توقف القلب", "مش قادر اتنفس", "مش عارف اتنفس", "إغماء", "اغماء",
     )
     _CLINIC = (
         "appointment", "book", "booking", "cancel", "reschedule", "clinic",
@@ -123,6 +125,18 @@ Use null for unknown entities. Any possible emergency symptom must be classified
                 if llm_result.query_class is QueryClass.EMERGENCY:
                     return llm_result
                 return llm_result
+
+        clinic = self._matches(normalized, self._CLINIC)
+        if clinic:
+            intent = self._normalize_clinic_intent(normalized, "clinic_info")
+            entities = self._enrich_entities(normalized, {})
+            return QueryClassification(
+                QueryClass.CLINIC, 0.92, clinic,
+                "Clinic terms detected; use clinic flow.",
+                intent=intent,
+                entities=entities,
+                source="deterministic_clinic_gate",
+            )
 
         return QueryClassification(
             QueryClass.MEDICAL, 0.70, (),

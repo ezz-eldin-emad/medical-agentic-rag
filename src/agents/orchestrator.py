@@ -77,22 +77,22 @@ class AgentOrchestrator:
             query = sanitization.sanitized_text
             context_key = self.context_manager.context_key(user_ref)
             existing_context = self.context_manager.get(context_key)
-            if existing_context and PatientContextManager.is_stale(
-                existing_context, self.settings.agents.session_timeout_minutes
+            if existing_context and (
+                existing_context.status in {"ready", "completed"}
+                or PatientContextManager.is_stale(
+                    existing_context, self.settings.agents.session_timeout_minutes
+                )
             ):
                 self.context_manager.clear(context_key)
                 existing_context = None
 
             classification = self.classifier.classify(query)
-            # A short reply such as "6" belongs to the active inquiry. Do not
-            # let the classifier LLM reinterpret it as a new emergency query.
-            # Explicit emergency phrases still win through the deterministic
-            # emergency gate above.
+            # A short reply such as "6" or "منذ يومين" belongs to the active inquiry.
+            # Explicit emergency phrases still win through the deterministic emergency gate.
             if (
                 existing_context is not None
                 and existing_context.status == "collecting"
                 and not QueryClassifier.has_deterministic_emergency_signal(query)
-                and classification.query_class is QueryClass.EMERGENCY
             ):
                 classification = QueryClassification(
                     query_class=QueryClass.MEDICAL,

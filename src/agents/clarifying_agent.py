@@ -22,7 +22,9 @@ class ClarifyingAgent:
     }
     _general_markers = {
         "what is", "what are", "common", "causes of", "symptoms of", "how does",
-        "ما هو", "ما هي", "ما هى", "أسباب", "اعراض", "أعراض مرض", "كيف يحدث",
+        "how to", "treatment", "treat", "cure", "remedies", "prevention", "definition",
+        "ما هو", "ما هي", "ما هى", "أسباب", "اسباب", "اعراض", "أعراض مرض", "كيف يحدث",
+        "علاج", "طرق علاج", "كيفية علاج", "الوقاية", "تعريف", "معلومات عن", "شرح",
     }
 
     def analyze(self, query: str, context: PatientContext | None = None) -> dict[str, Any]:

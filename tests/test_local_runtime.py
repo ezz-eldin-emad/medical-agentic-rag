@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from src.embeddings import local
+from src.embeddings import huggingface_api
 from src.embeddings.factory import get_embedder
 from src.config import get_settings
 from src.llm.config import GENERATOR_MODEL, REWRITER_MODEL, normalize_model
 from src.rag.retriever import reciprocal_rank_fusion
 
 
-def test_local_embedder_is_the_default(monkeypatch):
+def test_huggingface_embedder_is_the_default(monkeypatch):
     captured: dict[str, object] = {}
 
     class FakeEmbedder:
@@ -17,13 +17,13 @@ def test_local_embedder_is_the_default(monkeypatch):
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
-    monkeypatch.setenv("EMBEDDER_BACKEND", "local")
+    monkeypatch.setenv("EMBEDDER_BACKEND", "huggingface")
     get_settings.cache_clear()
-    monkeypatch.setattr(local, "BGEM3LocalEmbedder", FakeEmbedder)
+    monkeypatch.setattr(huggingface_api, "HuggingFaceInferenceEmbedder", FakeEmbedder)
 
     get_embedder()
 
-    assert captured["use_fp16"] is False
+    assert "settings" in captured
 
 
 def test_provider_model_ids_are_not_rewritten():

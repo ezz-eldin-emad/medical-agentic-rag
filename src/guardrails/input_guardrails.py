@@ -66,11 +66,26 @@ class InputSanitizer:
 
         masked = normalized
         pii = False
+        date_pattern = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$|^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$")
         for label, pattern in self._PII_PATTERNS:
-            if pattern.search(masked):
-                pii = True
-                findings.append(f"pii:{label}")
-                masked = pattern.sub(f"[REDACTED_{label.upper()}]", masked)
+            if label == "phone":
+                found_phone = False
+                def _replace_phone(m: re.Match[str]) -> str:
+                    nonlocal found_phone
+                    val = m.group(0).strip()
+                    if date_pattern.match(val):
+                        return m.group(0)
+                    found_phone = True
+                    return "[REDACTED_PHONE]"
+                masked = pattern.sub(_replace_phone, masked)
+                if found_phone:
+                    pii = True
+                    findings.append("pii:phone")
+            else:
+                if pattern.search(masked):
+                    pii = True
+                    findings.append(f"pii:{label}")
+                    masked = pattern.sub(f"[REDACTED_{label.upper()}]", masked)
 
         malicious = False
         for label, pattern in self._MALICIOUS_PATTERNS:

@@ -75,7 +75,9 @@ class MedicalRAGPipeline:
                 # numeric severity/age) to the already-sanitized user text.
                 # Re-sanitize only the user question portion; scanning the
                 # internal context can falsely classify it as a phone/card.
-                user_query_for_guard = query.split("\nStructured patient context:", 1)[0]
+                user_query_for_guard = query.split("\nStructured patient context:", 1)[0].strip()
+                if user_query_for_guard.startswith("User question:"):
+                    user_query_for_guard = user_query_for_guard.removeprefix("User question:").strip()
                 sanitization = self.sanitizer.sanitize(user_query_for_guard)
                 guard_span["allowed"] = sanitization.allowed
                 guard_span["pii_detected"] = sanitization.pii_detected
@@ -95,10 +97,19 @@ class MedicalRAGPipeline:
                 return self._finish(result, started)
 
             safe_query = sanitization.sanitized_text
-            with self.tracer.span("query_classifier", {"query_length": len(safe_query)}) as classifier_span:
-                classification = self.classifier.classify(safe_query)
-                classifier_span["query_class"] = classification.query_class.value
-                classifier_span["confidence"] = classification.confidence
+            if patient_context is not None:
+                from src.guardrails.classifier import QueryClass, QueryClassification
+                classification = QueryClassification(
+                    query_class=QueryClass.MEDICAL,
+                    confidence=1.0,
+                    reason="Pre-routed via medical inquiry loop.",
+                    intent="medical_question",
+                )
+            else:
+                with self.tracer.span("query_classifier", {"query_length": len(safe_query)}) as classifier_span:
+                    classification = self.classifier.classify(safe_query)
+                    classifier_span["query_class"] = classification.query_class.value
+                    classifier_span["confidence"] = classification.confidence
             log.info("Input classified as %s", classification.query_class.value)
 
             common = {
