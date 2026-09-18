@@ -83,7 +83,7 @@ class ClinicAgent:
 
     def handle(self, intent: str = "clinic_info", entities: dict[str, Any] | None = None, *, user_ref: str = "anonymous", query: str = "", **_: object) -> dict[str, Any]:
         if intent == "booking":
-            return self.book(entities or {}, user_ref=user_ref)
+            return self.book(entities or {}, user_ref=user_ref, query=query)
         if intent == "cancellation":
             return self.cancel(str((entities or {}).get("booking_id") or ""), user_ref=user_ref)
         if intent == "confirmation":
@@ -92,39 +92,77 @@ class ClinicAgent:
 
     def lookup(self, *, intent: str = "clinic_info", entities: dict[str, Any] | None = None, query: str = "") -> dict[str, Any]:
         entities = entities or {}
-        if self.booking_store is None and not self.clinic.get("_chunks"):
-            doctors = self._doctors(entities)
-            if intent == "availability":
-                day = self._weekday(entities)
-                rows = [{"doctor": d.get("name"), "specialization": d.get("specialization"), "day": day, "slots": d.get("schedule", {}).get(day, []) if day else d.get("schedule", {})} for d in doctors]
-                return {"route": "clinic_query", "answer": self._format_availability(rows, day), "data": self.clinic, "citations": []}
-            return {"route": "clinic_query", "answer": self._format_info(), "data": self.clinic, "citations": []}
+        # Use the LLM to naturally and accurately understand and answer user queries
+        if query and query.strip() and self.llm_client is not None:
+            answer = self._llm_lookup(intent, entities, query)
+            return {"route": "clinic_query", "answer": answer, "data": {"intent": intent}, "citations": []}
+
+        # Offline / deterministic fallback when no LLM or query is empty (e.g. unit tests)
         doctors = self._doctors(entities)
         if intent == "availability":
             day = self._weekday(entities)
             if not doctors:
                 return {"route": "clinic_query", "answer": "لا يوجد طبيب مطابق لهذا التخصص في بيانات العيادة حالياً.", "data": {"doctors": []}, "citations": []}
-            rows = []
-            for doctor in doctors:
-                schedule = doctor.get("schedule", {})
-                rows.append({"doctor": doctor.get("name"), "specialization": doctor.get("specialization"), "day": day, "slots": schedule.get(day, []) if day else schedule})
+            rows = [{"doctor": d.get("name"), "specialization": d.get("specialization"), "day": day, "slots": d.get("schedule", {}).get(day, []) if day else d.get("schedule", {})} for d in doctors]
             return {"route": "clinic_query", "answer": self._format_availability(rows, day), "data": {"doctors": rows}, "citations": []}
 
-        answer = self._llm_lookup(intent, entities, query, self._relevant_chunks(entities))
-        return {"route": "clinic_query", "answer": answer, "data": {"intent": intent}, "citations": []}
+        return {"route": "clinic_query", "answer": self._format_info(), "data": self.clinic, "citations": []}
 
-    def _relevant_chunks(self, entities: dict[str, Any]) -> list[str]:
-        chunks = [str(x) for x in self.clinic.get("_chunks", []) if str(x).strip()]
-        terms = [self._norm(v) for v in entities.values() if isinstance(v, str) and v.strip()]
-        if not terms:
-            return chunks[:8]
-        selected = [c for c in chunks if any(t in self._norm(c) for t in terms)]
-        return selected[:12] or chunks[:4]
+    def _format_clinic_context(self) -> str:
+        """Format full clinic catalog into clear reference text for the LLM."""
+        if self.clinic.get("_chunks"):
+            return "\n\n---\n\n".join(self.clinic["_chunks"])
 
-    def _llm_lookup(self, intent: str, entities: dict[str, Any], query: str, chunks: list[str]) -> str:
+        parts = []
+        info = self.clinic.get("clinic_info", {})
+        if info:
+            parts.append(
+                f"معلومات العيادة:\nالاسم: {info.get('name', '')} ({info.get('name_en', '')})\n"
+                f"العنوان: {info.get('address', '')}\nالهاتف: {info.get('phone', '')}\n"
+                f"طوارئ: {info.get('emergency_phone', '')}"
+            )
+        hours = self.clinic.get("working_hours", {})
+        if hours:
+            h_lines = [
+                f"- {day}: {h.get('open', '')}-{h.get('close', '')} ({h.get('note', '')})"
+                for day, h in hours.items() if isinstance(h, dict)
+            ]
+            parts.append("ساعات العمل العامة:\n" + "\n".join(h_lines))
+        doctors = self.clinic.get("doctors", [])
+        if doctors:
+            d_lines = []
+            for d in doctors:
+                sched = d.get("schedule", {})
+                s_str = ", ".join(f"{day}: {', '.join(slots)}" for day, slots in sched.items() if slots)
+                d_lines.append(
+                    f"الطبيب: {d.get('name', '')} ({d.get('name_en', '')})\n"
+                    f"الكود: {d.get('id', '')}\n"
+                    f"التخصص: {d.get('specialization', '')} ({d.get('specialization_en', '')})\n"
+                    f"سعر الكشف: {d.get('consultation_fee', '')} {d.get('currency', 'EGP')}\n"
+                    f"المواعيد المتاحة:\n{s_str}\n"
+                    f"ملاحظات: {d.get('notes', '')}"
+                )
+            parts.append("قائمة الأطباء وجداول المواعيد:\n\n" + "\n\n".join(d_lines))
+        services = self.clinic.get("services", [])
+        if services:
+            s_lines = [
+                f"- {s.get('name', '')}: {s.get('price', '')} {s.get('currency', 'EGP')} ({s.get('category', '')})"
+                for s in services
+            ]
+            parts.append("الخدمات والأسعار:\n" + "\n".join(s_lines))
+        policy = self.clinic.get("appointments_policy", {})
+        if policy:
+            parts.append(
+                f"سياسات المواعيد:\nطرق الحجز: {', '.join(policy.get('booking_methods', []))}\n"
+                f"سياسة الإلغاء: {policy.get('cancellation_policy', '')}"
+            )
+        return "\n\n====================\n\n".join(parts)
+
+    def _llm_lookup(self, intent: str, entities: dict[str, Any], query: str) -> str:
         prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "agents" / "clinic_answer.txt"
         system = prompt_path.read_text(encoding="utf-8")
-        user = f"USER QUESTION: {query}\nINTENT: {intent}\nENTITIES: {entities}\nDATA:\n" + "\n\n---\n\n".join(chunks)
+        data = self._format_clinic_context()
+        user = f"USER QUESTION: {query}\nINTENT: {intent}\nDATA:\n{data}"
         try:
             response = self.llm_client.complete(
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -133,7 +171,7 @@ class ClinicAgent:
                 num_retries=1,
             )
             text = str(response.choices[0].message.content or "").strip()
-            return text[:2000] if text else "لا توجد معلومات كافية في سجلات العيادة لهذا السؤال."
+            return text if text else "لا توجد معلومات كافية في سجلات العيادة لهذا السؤال."
         except Exception:
             return "لا أستطيع الوصول إلى معلومات العيادة الآن. حاول مرة أخرى لاحقًا."
 
@@ -204,16 +242,59 @@ class ClinicAgent:
             if os.path.exists(temporary):
                 os.unlink(temporary)
 
-    def _find_doctor(self, entities: dict[str, Any]) -> dict[str, Any] | None:
-        doctor_id = str(entities.get("doctor_id") or "")
-        for doctor in self.clinic.get("doctors", []):
-            if doctor.get("id") == doctor_id:
-                return doctor
-        doctors = self._doctors(entities)
-        return doctors[0] if len(doctors) == 1 else None
+    def _find_doctor(self, entities: dict[str, Any], query: str = "") -> dict[str, Any] | None:
+        doctor_id = str(entities.get("doctor_id") or "").strip()
+        doctors = self.clinic.get("doctors", [])
+        if doctor_id:
+            for doctor in doctors:
+                if doctor.get("id") == doctor_id:
+                    return doctor
+        matched = self._doctors(entities)
+        if len(matched) == 1:
+            return matched[0]
 
-    def book(self, entities: dict[str, Any], *, user_ref: str) -> dict[str, Any]:
-        doctor = self._find_doctor(entities)
+        if (query or entities) and self.llm_client is not None:
+            doctor = self._find_doctor_with_llm(entities, query)
+            if doctor:
+                return doctor
+
+        return matched[0] if len(matched) == 1 else None
+
+    def _find_doctor_with_llm(self, entities: dict[str, Any], query: str = "") -> dict[str, Any] | None:
+        if self.llm_client is None:
+            return None
+        doctors = self.clinic.get("doctors", [])
+        if not doctors:
+            return None
+        doctors_summary = "\n".join(
+            f"- ID: {d.get('id')}, Name: {d.get('name')}, Specialty: {d.get('specialization')} ({d.get('specialization_en')})"
+            for d in doctors
+        )
+        prompt = (
+            "Given this list of clinic doctors:\n"
+            f"{doctors_summary}\n\n"
+            f"User request: {query}\n"
+            f"Entities: {entities}\n\n"
+            "Which doctor ID does the user want to book with? "
+            "Return ONLY the exact doctor ID (e.g. DR001) without any other words, or 'NONE' if no doctor or specialty is specified."
+        )
+        try:
+            response = self.llm_client.complete(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.settings.llm.classifier_model,
+                temperature=0,
+                num_retries=1,
+            )
+            raw = str(response.choices[0].message.content or "").strip()
+            for d in doctors:
+                if d.get("id") == raw or (len(raw) <= 10 and d.get("id") in raw):
+                    return d
+        except Exception:
+            return None
+        return None
+
+    def book(self, entities: dict[str, Any], *, user_ref: str, query: str = "") -> dict[str, Any]:
+        doctor = self._find_doctor(entities, query)
         appointment_date = str(entities.get("date") or "")
         start_time = str(entities.get("time") or "")
         missing = []
