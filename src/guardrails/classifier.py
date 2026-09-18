@@ -6,10 +6,13 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import re
+import logging
 from typing import Any
 
 from src.config import AppSettings, get_settings
 from src.llm.client import LLMClient
+
+log = logging.getLogger(__name__)
 
 
 class QueryClass(str, Enum):
@@ -114,6 +117,7 @@ Use null for unknown entities. Any possible emergency symptom must be classified
         if self.use_llm and self.llm_client is not None:
             llm_result = self._classify_with_llm(normalized)
             if llm_result is not None:
+                log.info("Routing decision: class=%s intent=%s confidence=%.2f source=%s", llm_result.query_class.value, llm_result.intent, llm_result.confidence, llm_result.source)
                 # The LLM cannot downgrade a deterministic emergency finding;
                 # this second check protects against Arabic paraphrase errors.
                 if llm_result.query_class is QueryClass.EMERGENCY:
