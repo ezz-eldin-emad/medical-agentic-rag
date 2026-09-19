@@ -137,3 +137,22 @@ data                    Generated local artifacts (gitignored)
 ## Safety and privacy
 
 Do not use real patient identifiers or medical records. Never expose API keys in logs, screenshots, commits, or issue reports. Responses are educational and do not replace a qualified healthcare professional.
+
+## Deployment notes
+
+The deployed Qdrant collections have separate responsibilities:
+
+```text
+medical_kb          Medical-information retrieval source
+clinic_kb           Clinic, doctor, service, and availability source
+medical_app_state   Sessions, bookings, and Telegram update state
+```
+
+`medical_app_state` is operational state, not a knowledge source. The
+classifier LLM makes the primary route decision. Deterministic logic remains
+for emergency safety gates and provider-outage fallback only.
+
+The authenticated `/healthz/dependencies` endpoint verifies all three
+collections. Send the webhook secret in the
+`X-Telegram-Bot-Api-Secret-Token` header; never place the secret in logs or
+commits.
