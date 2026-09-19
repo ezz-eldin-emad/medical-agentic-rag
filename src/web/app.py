@@ -150,6 +150,7 @@ async def runtime_healthz(
 
 
 @app.post("/telegram/webhook")
+@app.post("/api/webhook")
 async def telegram_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
