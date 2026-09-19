@@ -36,6 +36,14 @@ def test_llm_classifier_parses_structured_routing_result():
     assert result.entities["specialty"] == "صدرية"
 
 
+def test_clinic_schedule_request_with_booking_goal_is_availability():
+    classifier = QueryClassifier()
+    result = classifier.classify("انا بطني وجعاني وعايز اعرف مواعيد الدكاترة عشان احجز")
+    assert result.query_class is QueryClass.CLINIC
+    assert result.intent == "availability"
+    assert result.entities["specialty"] == "باطنة عامة"
+
+
 def test_clinic_agent_reads_availability_without_llm(tmp_path: Path):
     bookings = tmp_path / "bookings.json"
     agent = ClinicAgent(clinic_path=CLINIC_FIXTURE, bookings_path=bookings)

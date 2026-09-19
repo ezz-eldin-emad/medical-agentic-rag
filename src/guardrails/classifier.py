@@ -192,10 +192,10 @@ Use null for unknown entities. Any possible emergency symptom must be classified
             return "cancellation"
         if any(term in lowered for term in ("confirm", "confirmation", "تأكيد", "تاكيد")):
             return "confirmation"
-        if any(term in lowered for term in ("book", "booking", "حجز", "احجز")):
-            return "booking"
         if any(term in lowered for term in ("appointment", "availability", "available", "موعد", "مواعيد", "متاحة", "متاح")):
             return "availability"
+        if any(term in lowered for term in ("book", "booking", "حجز", "احجز")):
+            return "booking"
         return intent or "clinic_info"
 
     @staticmethod
@@ -211,6 +211,8 @@ Use null for unknown entities. Any possible emergency symptom must be classified
                 "صدرية": "صدرية", "باطنة": "باطنة عامة", "أطفال": "أطفال", "اطفال": "أطفال",
                 "جلدية": "جلدية وتناسلية", "عظام": "عظام", "جراحة": "جراحة عامة",
                 "نساء": "نساء وتوليد", "توليد": "نساء وتوليد",
+                "بطن": "باطنة عامة", "بطني": "باطنة عامة", "معدة": "باطنة عامة",
+                "قولون": "باطنة عامة",
             }
             lowered = query.casefold()
             for term, specialty in aliases.items():
