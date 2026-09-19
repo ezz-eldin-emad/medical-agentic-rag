@@ -92,6 +92,7 @@ class AgentOrchestrator:
             if (
                 existing_context is not None
                 and existing_context.status == "collecting"
+                and classification.query_class is not QueryClass.CLINIC
                 and not QueryClassifier.has_deterministic_emergency_signal(query)
             ):
                 classification = QueryClassification(
@@ -139,12 +140,22 @@ class AgentOrchestrator:
                 }
             if classification.query_class is QueryClass.EMERGENCY:
                 result = self.safety_agent.handle(query=query)
-                return {**common, **self._normalize_result(result, "emergency"), "agent": "safety_agent"}
+                return {
+                    **common,
+                    **self._normalize_result(result, "emergency"),
+                    "agent": "safety_agent",
+                    "flow": "emergency",
+                }
 
             if classification.query_class is QueryClass.CLINIC:
                 intent = classification.intent or "clinic_info"
                 result = self.clinic_agent.handle(intent=intent, entities=entities, user_ref=user_ref, query=query)
-                return {**common, **self._normalize_result(result, "clinic_query"), "agent": "clinic_agent"}
+                return {
+                    **common,
+                    **self._normalize_result(result, "clinic_query"),
+                    "agent": "clinic_agent",
+                    "flow": "clinic",
+                }
 
             with self.tracer.span("clarifying_agent", {"query_length": len(query)}) as clarifying_span:
                 clarification = self.clarifying_agent.analyze(query, existing_context)
@@ -174,6 +185,8 @@ class AgentOrchestrator:
                         "sufficiency_score": inquiry["context"].sufficiency_score,
                         "missing_fields": inquiry["context"].missing_fields,
                         "session_id": inquiry["context"].session_id,
+                        "session_version": inquiry["context"].session_version,
+                        "flow": "medical_inquiry",
                     }
                 patient_context = inquiry["context"].to_dict()
                 medical_query = inquiry["augmented_query"]
@@ -183,7 +196,13 @@ class AgentOrchestrator:
                 top_k=top_k,
                 patient_context=patient_context,
             )
-            return {**common, **result, "agent": "documentation_agent", "route": "medical_query"}
+            return {
+                **common,
+                **result,
+                "agent": "documentation_agent",
+                "route": "medical_query",
+                "flow": "medical",
+            }
 
     def reset_session(self, *, user_ref: str) -> None:
         """Explicitly start a fresh conversation for one user."""

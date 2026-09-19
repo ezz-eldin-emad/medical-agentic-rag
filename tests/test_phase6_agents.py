@@ -7,6 +7,8 @@ from src.agents.clinic_agent import ClinicAgent
 from src.agents.orchestrator import AgentOrchestrator
 from src.guardrails.classifier import QueryClass, QueryClassification, QueryClassifier
 
+CLINIC_FIXTURE = Path(__file__).parent / "fixtures" / "clinic_info.json"
+
 
 class FakeMessage:
     content = '{"query_class":"clinic_query","intent":"availability","confidence":0.94,"reason":"appointment wording","entities":{"specialty":"صدرية","weekday":"السبت"}}'
@@ -36,7 +38,7 @@ def test_llm_classifier_parses_structured_routing_result():
 
 def test_clinic_agent_reads_availability_without_llm(tmp_path: Path):
     bookings = tmp_path / "bookings.json"
-    agent = ClinicAgent(bookings_path=bookings)
+    agent = ClinicAgent(clinic_path=CLINIC_FIXTURE, bookings_path=bookings)
     result = agent.lookup(intent="availability", entities={"doctor_id": "DR001", "weekday": "السبت"})
     assert result["route"] == "clinic_query"
     assert "د. أحمد السيد" in result["answer"]
@@ -44,14 +46,14 @@ def test_clinic_agent_reads_availability_without_llm(tmp_path: Path):
 
 
 def test_clinic_agent_returns_structured_prices_without_llm(tmp_path: Path):
-    result = ClinicAgent(bookings_path=tmp_path / "bookings.json").lookup(intent="clinic_info")
+    result = ClinicAgent(clinic_path=CLINIC_FIXTURE, bookings_path=tmp_path / "bookings.json").lookup(intent="clinic_info")
     assert "كشف عظام" in result["answer"]
     assert "320 EGP" in result["answer"]
 
 
 def test_clinic_booking_confirm_cancel_and_persists(tmp_path: Path):
     bookings = tmp_path / "bookings.json"
-    agent = ClinicAgent(bookings_path=bookings)
+    agent = ClinicAgent(clinic_path=CLINIC_FIXTURE, bookings_path=bookings)
     entities = {"doctor_id": "DR001", "date": "2026-08-29", "time": "10:30"}
 
     created = agent.book(entities, user_ref="telegram:42")
@@ -66,7 +68,7 @@ def test_clinic_booking_confirm_cancel_and_persists(tmp_path: Path):
 
 
 def test_clinic_booking_rejects_schedule_conflicts(tmp_path: Path):
-    agent = ClinicAgent(bookings_path=tmp_path / "bookings.json")
+    agent = ClinicAgent(clinic_path=CLINIC_FIXTURE, bookings_path=tmp_path / "bookings.json")
     entities = {"doctor_id": "DR001", "date": "2026-08-29", "time": "10:30"}
     assert agent.book(entities, user_ref="telegram:1")["status"] == "pending"
     assert agent.book(entities, user_ref="telegram:2")["status"] == "conflict"

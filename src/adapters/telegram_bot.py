@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import sys
+import asyncio
 from typing import Any
 
 from src.config import AppSettings, get_settings
@@ -38,6 +39,8 @@ log = setup_logging("adapters.telegram_bot")
 class TelegramBotAdapter:
     """Telegram Bot Adapter wrapping MedicalRAGPipeline with async polling."""
 
+    _telegram_message_limit = 4096
+
     def __init__(
         self,
         token: str | None = None,
@@ -64,6 +67,7 @@ class TelegramBotAdapter:
         self._processed_update_ids: set[int] = set()
         self._processed_update_limit = 2048
         self._session_generations: dict[str, int] = {}
+        self._conversation_locks: dict[str, asyncio.Lock] = {}
         self.update_store = update_store
         self._webhook_seen_ids: set[int] = set()
         self._register_handlers()
@@ -138,8 +142,9 @@ class TelegramBotAdapter:
             return
         user = update.message.from_user
         user_id = user.id if user is not None else "unknown"
+        chat_id = update.message.chat_id
         self._session_generations[str(user_id)] = self._session_generations.get(str(user_id), 0) + 1
-        self.orchestrator.reset_session(user_ref=f"telegram:{user_id}")
+        self.orchestrator.reset_session(user_ref=f"telegram:{chat_id}")
         await update.message.reply_text(
             "بدأت محادثة جديدة. ما العرض أو السؤال الذي تريد مناقشته؟"
         )
@@ -162,37 +167,49 @@ class TelegramBotAdapter:
         query = update.message.text.strip()
         user = update.message.from_user
         user_id = user.id if user is not None else "unknown"
-        log.info(f"[Telegram] Received query from user {user_id}: '{query[:50]}'")
+        chat_id = update.message.chat_id
+        conversation_ref = f"telegram:{chat_id}"
+        log.info("[Telegram] Received message for chat %s (length=%s)", chat_id, len(query))
 
         # Send typing action indicator while processing
         await update.message.reply_chat_action(ChatAction.TYPING)
 
+        lock = self._conversation_locks.setdefault(str(chat_id), asyncio.Lock())
+        async with lock:
+            await self._process_message(update, query, conversation_ref)
+
+    async def _process_message(self, update: Update, query: str, conversation_ref: str) -> None:
         try:
-            context_key = self.orchestrator.context_manager.context_key(f"telegram:{user_id}")
+            context_key = self.orchestrator.context_manager.context_key(conversation_ref)
             context_before = self.orchestrator.context_manager.get(context_key)
             session_before = context_before.session_id if context_before else None
-            generation_before = self._session_generations.get(str(user_id), 0)
+            version_before = context_before.session_version if context_before else None
 
             # Run RAG Pipeline in thread pool to prevent blocking asyncio loop
-            import asyncio
             result = await asyncio.to_thread(
                 self.orchestrator.handle,
                 query=query,
-                user_ref=f"telegram:{user_id}",
+                user_ref=conversation_ref,
             )
 
             # /new or /reset may have been received while this request was
             # running. Never deliver a response belonging to the old session.
             context_after = self.orchestrator.context_manager.get(context_key)
             result_session = result.get("session_id")
-            if self._session_generations.get(str(user_id), 0) != generation_before:
-                log.info("[Telegram] Discarding response after a new session was started for user %s", user_id)
-                return
             if session_before and context_after is None:
-                log.info("[Telegram] Discarding stale response after session reset for user %s", user_id)
+                log.info("[Telegram] Discarding stale response after session reset for chat %s", conversation_ref)
                 return
             if result_session and context_after and context_after.session_id != result_session:
-                log.info("[Telegram] Discarding response from an older session for user %s", user_id)
+                log.info("[Telegram] Discarding response from an older session for chat %s", conversation_ref)
+                return
+            result_version = result.get("session_version")
+            if (
+                result_version is not None
+                and version_before is not None
+                and context_after is not None
+                and context_after.session_version != result_version
+            ):
+                log.info("[Telegram] Discarding stale response for chat %s", conversation_ref)
                 return
 
             with self.orchestrator.tracer.span("response_render", {"channel": "telegram"}) as render_span:
@@ -201,10 +218,7 @@ class TelegramBotAdapter:
 
             # Keep internal evidence, prompts, scores, trace data, and latency
             # out of the patient-facing Telegram message.
-            try:
-                await update.message.reply_text(formatted_reply)
-            except TelegramError:
-                await update.message.reply_text(formatted_reply)
+            await self._send_response(update.message, formatted_reply)
 
         except Exception:
             log.exception("[Telegram] Error executing pipeline")
@@ -213,6 +227,22 @@ class TelegramBotAdapter:
                 "يرجى المحاولة مرة أخرى أو التأكد من إعدادات الاتصال بالشبكة."
             )
             await update.message.reply_text(error_msg, parse_mode=ParseMode.MARKDOWN)
+
+    async def _send_response(self, message: Any, text: str) -> None:
+        """Send a patient response in Telegram-safe chunks with one fallback."""
+
+        chunks = [
+            text[index : index + self._telegram_message_limit]
+            for index in range(0, len(text), self._telegram_message_limit)
+        ] or [""]
+        for chunk in chunks:
+            try:
+                await message.reply_text(chunk)
+            except TelegramError:
+                # Formatting is intentionally not enabled for generated answers;
+                # a second attempt is useful for transient Telegram failures.
+                await asyncio.sleep(0.2)
+                await message.reply_text(chunk)
 
     # ── Start Polling ────────────────────────────────────────────────
     def run_polling(self) -> None:
@@ -226,11 +256,16 @@ class TelegramBotAdapter:
         if update_id is not None:
             key = str(update_id)
             if self.update_store is not None:
-                existing = self.update_store.get("telegram_update", key)
-                if existing and existing.get("status") in {"received", "completed"}:
+                if hasattr(self.update_store, "claim_update"):
+                    claimed = self.update_store.claim_update(key)
+                else:
+                    existing = self.update_store.get("telegram_update", key)
+                    claimed = not (existing and existing.get("status") in {"received", "completed"})
+                    if claimed:
+                        self.update_store.put("telegram_update", key, {"status": "received"})
+                if not claimed:
                     log.info("[Telegram] Ignoring duplicate webhook update %s", update_id)
                     return
-                self.update_store.put("telegram_update", key, {"status": "received"})
             elif update_id in self._webhook_seen_ids:
                 return
             else:
@@ -238,10 +273,16 @@ class TelegramBotAdapter:
         try:
             await self.app.process_update(update)
             if update_id is not None and self.update_store is not None:
-                self.update_store.put("telegram_update", str(update_id), {"status": "completed"})
+                if hasattr(self.update_store, "complete_update"):
+                    self.update_store.complete_update(str(update_id))
+                else:
+                    self.update_store.put("telegram_update", str(update_id), {"status": "completed"})
         except Exception:
             if update_id is not None and self.update_store is not None:
-                self.update_store.put("telegram_update", str(update_id), {"status": "failed"})
+                if hasattr(self.update_store, "fail_update"):
+                    self.update_store.fail_update(str(update_id))
+                else:
+                    self.update_store.put("telegram_update", str(update_id), {"status": "failed"})
             raise
 
 

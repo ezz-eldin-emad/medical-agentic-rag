@@ -14,11 +14,13 @@ def test_settings_keep_behavioral_defaults_centralized(monkeypatch):
 def test_deployment_overrides_are_typed_and_process_env_wins(monkeypatch):
     monkeypatch.setenv("EMBEDDER_BACKEND", "local")
     monkeypatch.setenv("QDRANT_URL", "http://example-qdrant:6333")
+    monkeypatch.setenv("QDRANT_STORAGE_COLLECTION", "deployed_medical_collection")
     get_settings.cache_clear()
     settings = get_settings()
 
     assert settings.embedding.backend == "local"
     assert settings.vectordb.qdrant_url == "http://example-qdrant:6333"
+    assert settings.vectordb.medical_collection == "deployed_medical_collection"
 
 
 def test_local_override_is_immutable_and_does_not_change_base_settings(monkeypatch):

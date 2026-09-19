@@ -24,6 +24,9 @@ from src.config import AppSettings, get_settings
 class PatientContext:
     context_key: str
     session_id: str = ""
+    session_version: int = 0
+    active_flow: str = "idle"
+    active_agent: str = ""
     language: str = "en"
     symptoms: list[str] = field(default_factory=list)
     onset_or_duration: str = ""
@@ -57,7 +60,13 @@ class PatientContextManager:
         if self.store is None and path is None and self.settings.runtime.state_backend == "qdrant":
             from src.state import QdrantStateStore
 
-            self.store = QdrantStateStore.from_settings(self.settings)
+            try:
+                self.store = QdrantStateStore.from_settings(self.settings)
+            except RuntimeError:
+                # Keep unit tests and local CLI usage usable when the optional
+                # cloud collection is not configured. Vercel still fails fast
+                # in WebRuntime, where Qdrant is required.
+                self.store = None
         configured = path or self.settings.agents.patient_context_path
         self.path = self.settings.resolve_path(configured)
 
@@ -81,6 +90,7 @@ class PatientContextManager:
             for key, value in updates.items():
                 if key in current.__dataclass_fields__ and key != "context_key":
                     setattr(current, key, value)
+            current.session_version += 1
             current.updated_at = datetime.now(timezone.utc).isoformat()
             self.store.put("patient_context", context_key, current.to_dict())
             return current
@@ -92,6 +102,7 @@ class PatientContextManager:
         for key, value in updates.items():
             if key in current.__dataclass_fields__ and key != "context_key":
                 setattr(current, key, value)
+        current.session_version += 1
         current.updated_at = datetime.now(timezone.utc).isoformat()
         records[context_key] = current.to_dict()
         self._write(records)
@@ -101,6 +112,20 @@ class PatientContextManager:
         """End the current conversation session for an adapter user."""
 
         self.clear(self.context_key(user_ref))
+
+    def session_snapshot(self, context_key: str) -> tuple[str, int] | None:
+        """Return the current session identity for stale-response checks."""
+
+        context = self.get(context_key)
+        if context is None:
+            return None
+        return context.session_id, context.session_version
+
+    def matches_session(self, context_key: str, session_id: str, version: int) -> bool:
+        """Return whether a response still belongs to the active session."""
+
+        current = self.get(context_key)
+        return current is not None and current.session_id == session_id and current.session_version == version
 
     @staticmethod
     def is_stale(context: PatientContext, timeout_minutes: int) -> bool:

@@ -104,11 +104,18 @@ async def dependency_healthz(
     try:
         from src.rag.retriever import connect_qdrant
         client, _ = connect_qdrant(settings.vectordb.medical_collection, settings)
-        checks["medical_kb"] = settings.vectordb.medical_collection in {
-            item.name for item in client.get_collections().collections
+        collections = {item.name for item in client.get_collections().collections}
+        checks["medical_collection"] = {
+            "name": settings.vectordb.medical_collection,
+            "available": settings.vectordb.medical_collection in collections,
         }
-        checks["state_collection"] = settings.vectordb.state_collection in {
-            item.name for item in client.get_collections().collections
+        checks["clinic_collection"] = {
+            "name": settings.vectordb.clinic_collection,
+            "available": settings.vectordb.clinic_collection in collections,
+        }
+        checks["state_collection"] = {
+            "name": settings.vectordb.state_collection,
+            "available": settings.vectordb.state_collection in collections,
         }
     except Exception as exc:
         checks["qdrant"] = type(exc).__name__

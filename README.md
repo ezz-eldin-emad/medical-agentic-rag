@@ -45,6 +45,15 @@ cp .env.example .env
 ./.venv/bin/python main.py --bot
 ```
 
+Use `uv run` for development commands so tests and the application use the
+project-managed environment:
+
+```bash
+uv sync --group dev
+uv run pytest -q
+uv run python main.py --check
+```
+
 The runtime requires the cloud environment variables described below.
 
 ## Indexing
@@ -81,6 +90,8 @@ HF_TOKEN=<huggingface-token>
 HF_EMBED_MODEL=intfloat/multilingual-e5-large
 QDRANT_URL=https://<cluster>.qdrant.io
 QDRANT_API_KEY=<qdrant-key>
+QDRANT_STORAGE_COLLECTION=medical_kb
+QDRANT_CLINIC_COLLECTION=clinic_kb
 QDRANT_STATE_COLLECTION=medical_app_state
 PHOENIX_ENABLED=false
 ```

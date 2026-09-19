@@ -1,0 +1,27 @@
+{
+  "clinic_info": {
+    "name": "Test clinic",
+    "address": "Test address",
+    "phone": "01000000000"
+  },
+  "doctors": [
+    {
+      "id": "DR001",
+      "name": "د. أحمد السيد",
+      "specialization": "صدرية",
+      "specialization_en": "Pulmonology",
+      "consultation_fee": 320,
+      "currency": "EGP",
+      "schedule": {
+        "saturday": ["10:30-11:30", "11:30-12:30"]
+      }
+    }
+  ],
+  "services": [
+    {"name": "كشف عظام", "price": 320, "currency": "EGP"}
+  ],
+  "appointments_policy": {
+    "booking_methods": ["Telegram"],
+    "cancellation_policy": "قبل الموعد"
+  }
+}

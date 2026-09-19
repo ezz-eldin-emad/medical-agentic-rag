@@ -8,6 +8,7 @@ filesystem to stay ephemeral without introducing another hosted database.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from src.config import AppSettings, get_settings
@@ -100,3 +101,46 @@ class QdrantStateStore:
             if isinstance(value, dict):
                 values.append(value)
         return values
+
+    def claim_update(self, update_id: str, *, lease_seconds: int = 300) -> bool:
+        """Claim a Telegram update unless it is already completed or leased."""
+
+        key = str(update_id)
+        current = self.get("telegram_update", key)
+        now = datetime.now(timezone.utc)
+        if current:
+            if current.get("status") == "completed":
+                return False
+            try:
+                claimed_at = datetime.fromisoformat(str(current.get("claimed_at", "")))
+            except ValueError:
+                claimed_at = now
+            if current.get("status") == "processing" and (now - claimed_at).total_seconds() < lease_seconds:
+                return False
+            attempts = int(current.get("attempts", 0)) + 1
+        else:
+            attempts = 1
+        self.put(
+            "telegram_update",
+            key,
+            {"status": "processing", "claimed_at": now.isoformat(), "attempts": attempts},
+        )
+        return True
+
+    def complete_update(self, update_id: str) -> None:
+        """Mark a claimed Telegram update as completed."""
+
+        key = str(update_id)
+        current = self.get("telegram_update", key) or {}
+        self.put(
+            "telegram_update",
+            key,
+            {**current, "status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()},
+        )
+
+    def fail_update(self, update_id: str) -> None:
+        """Release a failed update so a later delivery can retry it."""
+
+        key = str(update_id)
+        current = self.get("telegram_update", key) or {}
+        self.put("telegram_update", key, {**current, "status": "failed"})

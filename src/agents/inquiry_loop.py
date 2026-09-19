@@ -71,6 +71,8 @@ class InquiryLoop:
             context_key,
             {
                 **updates,
+                "active_flow": "medical_inquiry",
+                "active_agent": "clarifying_agent",
                 "language": current.language,
                 "sufficiency_score": score,
                 "missing_fields": missing,
@@ -81,6 +83,10 @@ class InquiryLoop:
         )
 
         if status == "ready":
+            context = self.context_manager.create_or_update(
+                context_key,
+                {"active_flow": "medical", "active_agent": "documentation_agent"},
+            )
             return {
                 "status": "ready",
                 "context": context,

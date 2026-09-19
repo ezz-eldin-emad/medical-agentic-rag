@@ -262,6 +262,49 @@ def test_active_inquiry_numeric_reply_cannot_become_emergency(tmp_path: Path):
     assert second["route"] != "emergency"
 
 
+def test_active_inquiry_can_switch_to_clinic_flow(tmp_path: Path):
+    class Classifier:
+        def classify(self, query):
+            if "appointment" in query:
+                return QueryClassification(QueryClass.CLINIC, 1.0, intent="availability")
+            return QueryClassification(QueryClass.MEDICAL, 1.0, intent="medical_question")
+
+    class Documentation:
+        pipeline = object()
+
+        def handle(self, query, **kwargs):
+            return {"answer": "medical answer", "status": "answered", "citations": []}
+
+    class Clinic:
+        def handle(self, **kwargs):
+            return {"answer": "clinic answer", "status": "answered"}
+
+    manager = PatientContextManager(path=tmp_path / "contexts.json")
+    orchestrator = AgentOrchestrator(
+        classifier=Classifier(),
+        clinic_agent=Clinic(),
+        documentation_agent=Documentation(),
+        context_manager=manager,
+    )
+
+    first = orchestrator.handle("I have a headache", user_ref="telegram:101")
+    assert first["flow"] == "medical_inquiry"
+    switched = orchestrator.handle("I want an appointment", user_ref="telegram:101")
+    assert switched["agent"] == "clinic_agent"
+    assert switched["flow"] == "clinic"
+
+
+def test_context_updates_increment_session_version(tmp_path: Path):
+    manager = PatientContextManager(path=tmp_path / "contexts.json")
+    key = manager.context_key("telegram:versioned")
+    first = manager.create_or_update(key, {"status": "collecting"})
+    second = manager.create_or_update(key, {"active_flow": "medical_inquiry"})
+    assert first.session_version == 1
+    assert second.session_version == 2
+    assert manager.matches_session(key, second.session_id, 2)
+    assert not manager.matches_session(key, second.session_id, 1)
+
+
 def test_reset_session_removes_active_context(tmp_path: Path):
     manager = PatientContextManager(path=tmp_path / "contexts.json")
     manager.create_or_update(manager.context_key("telegram:99"), {"status": "collecting"})

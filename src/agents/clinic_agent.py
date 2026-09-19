@@ -31,7 +31,10 @@ class ClinicAgent:
         if self.booking_store is None and bookings_path is None and app_settings.runtime.state_backend == "qdrant":
             from src.state import QdrantStateStore
 
-            self.booking_store = QdrantStateStore.from_settings(app_settings)
+            try:
+                self.booking_store = QdrantStateStore.from_settings(app_settings)
+            except RuntimeError:
+                self.booking_store = None
         self.clinic_path = clinic_path or app_settings.resolve_path(app_settings.agents.clinic_data_path)
         self.bookings_path = bookings_path or app_settings.resolve_path(app_settings.agents.bookings_path)
         if self.clinic_path.exists():
@@ -39,14 +42,19 @@ class ClinicAgent:
         elif app_settings.runtime.state_backend == "qdrant":
             self.clinic = self._load_clinic_kb()
         else:
-            self.clinic = {"clinic_info": {}, "doctors": [], "services": [], "appointments_policy": {}}
+            self.clinic = self._empty_clinic()
+
+    @staticmethod
+    def _empty_clinic() -> dict[str, Any]:
+        """Return an empty catalog when no source collection is configured."""
+        return {"clinic_info": {}, "doctors": [], "services": [], "appointments_policy": {}}
 
     def _load_clinic_kb(self) -> dict[str, Any]:
         """Load the deployed clinic catalog from Qdrant chunks, not disk."""
         try:
             client = getattr(self.booking_store, "client", None)
             if client is None:
-                return {"clinic_info": {}, "doctors": [], "services": [], "appointments_policy": {}}
+                return self._empty_clinic()
             records, _ = client.scroll(
                 collection_name=self.settings.vectordb.clinic_collection,
                 limit=128,
@@ -54,9 +62,9 @@ class ClinicAgent:
                 with_vectors=False,
             )
             texts = [str((point.payload or {}).get("text", "")) for point in records]
-            return {"clinic_info": {}, "doctors": [], "services": [], "appointments_policy": {}, "_chunks": texts}
+            return {"clinic_info": {}, "doctors": [], "services": [], "appointments_policy": {}, "_chunks": texts} if texts else self._empty_clinic()
         except Exception:
-            return {"clinic_info": {}, "doctors": [], "services": [], "appointments_policy": {}, "_chunks": []}
+            return self._empty_clinic()
 
     @staticmethod
     def _norm(value: object) -> str:

@@ -172,6 +172,11 @@ def get_settings() -> AppSettings:
         vectordb=VectorDBSettings(
             qdrant_url=_env("QDRANT_URL"),
             qdrant_path=Path(_env("QDRANT_PATH", "data/qdrant")),
+            medical_collection=_env(
+                "QDRANT_STORAGE_COLLECTION",
+                _env("QDRANT_MEDICAL_COLLECTION", "medical_kb"),
+            ),
+            clinic_collection=_env("QDRANT_CLINIC_COLLECTION", "clinic_kb"),
             state_collection=_env("QDRANT_STATE_COLLECTION", "medical_app_state"),
         ),
         agents=AgentSettings(
